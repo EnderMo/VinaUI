@@ -7,6 +7,7 @@
 #include "VertexUI/VertexUI.Panel.h"
 #include "VertexUI/VertexUI.min.h"
 #include "MainUI.hpp"
+#include "VinaWindow.hpp"
 VertexUIInit;
 #define MAX_LOADSTRING 100
 
@@ -137,8 +138,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
     case WM_CREATE:
     {
-
-
+        static VinaWindow* win = new VinaWindow;
+        win->Set(100, 100, 400, 300, L"aifhlshefgweh", L"Test");
+        win->SetOutFrame(VinaWindow::Client);
+        win->SetRoundRgn(14);
+        win->CreatePanel([](HWND hWnd, ID2D1HwndRenderTarget* hrt)->void {
+            RECT rc; GetClientRect(hWnd, &rc);
+            D2DDrawSolidRect(hrt, 0, 0, rc.right / gScale, rc.bottom / gScale, VERTEXUICOLOR_DARKEN, 1);
+            win->GetPanel()->Set(hWnd, hrt);
+            static std::shared_ptr<VinaButton>test = std::make_shared<VinaButton>();
+            test->Set(20, 20, 100, 40, L"关闭", [] {DestroyWindow(win->GetHandle()); });
+            win->GetPanel()->Add(test);
+            });
+        win->Create();
         break;
     }
     case WM_COMMAND:
@@ -148,6 +160,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             switch (wmId)
             {
             case IDM_ABOUT:
+                static VinaWindow* win = new VinaWindow;
+                win->Set(100, 100, 400, 300, L"aifhlshefgweh11", L"Test");
+                win->SetOutFrame(VinaWindow::Disable);
+                win->SetRoundRgn(14);
+                win->CreatePanel([](HWND hWnd, ID2D1HwndRenderTarget* hrt)->void {
+                    RECT rc; GetClientRect(hWnd, &rc);
+                    D2DDrawSolidRect(hrt, 0, 0, rc.right/gScale, rc.bottom/gScale, VERTEXUICOLOR_DARKEN, 1);
+                    win->GetPanel()->Set(hWnd, hrt);
+                    static std::shared_ptr<VinaButton>test = std::make_shared<VinaButton>();
+                    test->Set(20, 20, 100, 40, L"关闭", [] {DestroyWindow(win->GetHandle()); });
+                    win->GetPanel()->Add(test);
+                    });
+                win->Create();
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
             case IDM_EXIT:
@@ -163,7 +188,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         D2D1_SIZE_U resize;
         resize.height = HIWORD(lParam);
         resize.width = LOWORD(lParam);
-        if (pRT != NULL)pRT->Resize(resize);
+        if (pRts[hWnd] != NULL)pRts[hWnd]->Resize(resize);
         break;
     }
     case  WM_MOUSEMOVE:

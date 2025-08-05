@@ -7,7 +7,7 @@
 std::map<std::wstring, std::function<void()>>vinaFuncMap = {
 
 {std::wstring(L"NIUZHI"), []()->void {
-	
+       
 }},
 
 {std::wstring(L""), []()->void {

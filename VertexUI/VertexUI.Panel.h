@@ -10,13 +10,14 @@
 #include "framework.h"
 #include "VertexUI.Colors.h"
 #include <Shlwapi.h>
-#include <ShlObj_core.h>
+#include <ShlObj.h>
+#include <commoncontrols.h>
 #include <algorithm>
 #include <time.h>
 #include <assert.h>
 #include <vector>
 #include <functional>
-
+#include <map>
 #include <gdiplus.h>
 using namespace Gdiplus;
 #pragma comment(lib, "gdiplus.lib") 
@@ -30,14 +31,13 @@ ULONG_PTR           gdiplusToken;
 #include <iostream>
 #pragma comment(lib, "d2d1.lib") 
 #pragma comment(lib, "dwrite.lib") 
-
 ID2D1Factory* m_pD2DFactory = NULL;
 IDWriteFactory* pDWriteFactory = NULL;
 
 IWICImagingFactory* m_ImageFactory = NULL;
-ID2D1PathGeometry* m_pPathGeometry = NULL;
+
 ID2D1DCRenderTarget* m_pDCRT = NULL;
-double gScale=1;
+double gScale = 1;
 double GetScreenScale() {
 	HWND hd = GetDesktopWindow();
 	HDC hdc = GetDC(hd);
@@ -58,8 +58,20 @@ double GetScreenScale() {
 		dpi = 1.5;
 		std::cout << "150%" << std::endl;
 		break;
+	case 168:
+		dpi = 1.75;
+		std::cout << "150%" << std::endl;
+		break;
 	case 192:
 		dpi = 2;
+		std::cout << "200%" << std::endl;
+		break;
+	case 216:
+		dpi = 2.25;
+		std::cout << "200%" << std::endl;
+		break;
+	case 240:
+		dpi = 2.5;
 		std::cout << "200%" << std::endl;
 		break;
 	default:
@@ -94,9 +106,8 @@ void InitGlobalD2D()
 		__uuidof(IDWriteFactory),
 		reinterpret_cast<IUnknown**>(&pDWriteFactory));
 
-	//CoInitialize(NULL);
-	//CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, __uuidof(m_ImageFactory), (LPVOID*)&m_ImageFactory);
-
+	CoInitialize(NULL);
+	CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, __uuidof(m_ImageFactory), (LPVOID*)&m_ImageFactory);
 
 }
 void D2DInitDCRT(ID2D1DCRenderTarget** dc)
@@ -117,8 +128,11 @@ void D2DInitDCRT(ID2D1DCRenderTarget** dc)
 int GlobalAnimationCount = 0;
 bool GPURenderCompatibility = true;
 #pragma warning(disable:4996)
+#define FullDesign
 
+#ifdef FullDesign
 #include "VertexUI.ClickArea.h"
+#endif
 #include <shellapi.h>
 #include "VertexUI.Control.hpp"
 #define VERTEXUI_FLAGS_ANIMATION 0
@@ -136,9 +150,6 @@ bool GPURenderCompatibility = true;
 #define InitCtl(ctlname,x,y,cx,cy,fun,txt) {ctlname,x,y,cx,cy,fun,txt}
 
 
-#define RGBA(r,g,b,a) ((COLORREF)((((DWORD)(BYTE)(a))<<24)|RGB(r,g,b)))
-
-#define GetAValue(rgba) ((BYTE)(((DWORD)((rgba)>>24)) & 0xff))
 
 namespace VertexUI
 {
@@ -198,7 +209,7 @@ namespace VertexUI
 	const wchar_t* PrevPanelID = L"Init";
 	const wchar_t* ButtonText = L"Button";
 	int g_hoverstate = 0;
-	
+
 	VertexUIPos SharedPos;
 	namespace Panel
 	{
@@ -230,27 +241,20 @@ namespace VertexUI
 		}
 		unsigned long RGBToHex(unsigned long OriClr)
 		{
-			return  GetRValue(OriClr) << 16 | GetGValue(OriClr) << 8 | GetBValue(OriClr);
+			return GetRValue(OriClr) << 16 | GetGValue(OriClr) << 8 | GetBValue(OriClr);
 		}
 		template<class T>
 		void D2DDrawRoundRect(T* m_pDCRT, float x, float y, float cx, float cy, unsigned long ClrFill, float radius, float alpha = 1, float border = 0, unsigned long borderColor = 0, float borderAlphaSpecial = 0, bool OnlyBorder = false)
 		{
 			int hr = 0;
 			ID2D1SolidColorBrush* testBrush = NULL;
-			if (alpha == 1) { alpha = GetAValue(ClrFill) / 255.f; 
-			if (GetAValue(ClrFill)==0)alpha = 1;
-			}
 			hr = m_pDCRT->CreateSolidColorBrush(
 				D2D1::ColorF(D2D1::ColorF(RGBToHex(ClrFill), alpha)),
 				&testBrush
 			);
-
 			ID2D1SolidColorBrush* testBrushOut = NULL;
 			float ba = alpha;
 			if (borderAlphaSpecial != 0)ba = borderAlphaSpecial;
-			if (borderAlphaSpecial == 1) { ba = GetAValue(borderColor) / 255.f; 
-			if (GetAValue(borderColor)==0)borderAlphaSpecial = 1;
-			}
 			hr = m_pDCRT->CreateSolidColorBrush(
 				D2D1::ColorF(D2D1::ColorF(RGBToHex(borderColor), ba)),
 				&testBrushOut
@@ -272,10 +276,43 @@ namespace VertexUI
 			}
 		}
 		template<class T>
-		void D2DDrawSolidRect(T* m_pDCRT, int x, int y, int cx, int cy, unsigned long ClrFill,float alpha = 1)
+		void D2DDrawRoundRect2(T m_pDCRT, float x, float y, float cx, float cy, unsigned long ClrFill, float radius, float alpha = 1, float border = 0, unsigned long borderColor = 0, float borderAlphaSpecial = 0, bool OnlyBorder = false)
 		{
 			int hr = 0;
 			ID2D1SolidColorBrush* testBrush = NULL;
+			hr = m_pDCRT->CreateSolidColorBrush(
+				D2D1::ColorF(D2D1::ColorF(RGBToHex(ClrFill), alpha)),
+				&testBrush
+			);
+			ID2D1SolidColorBrush* testBrushOut = NULL;
+			float ba = alpha;
+			if (borderAlphaSpecial != 0)ba = borderAlphaSpecial;
+			hr = m_pDCRT->CreateSolidColorBrush(
+				D2D1::ColorF(D2D1::ColorF(RGBToHex(borderColor), ba)),
+				&testBrushOut
+			);
+			if (SUCCEEDED(hr))
+			{
+				D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(
+					D2D1::RectF(x, y, cx + x, cy + y),
+					radius,
+					radius
+				);
+				m_pDCRT->DrawRoundedRectangle(roundedRect, testBrushOut, border);
+				if (OnlyBorder == false)
+				{
+					m_pDCRT->FillRoundedRectangle(roundedRect, testBrush);
+				}
+				SafeRelease(&testBrush);
+				SafeRelease(&testBrushOut);
+			}
+		}
+		template<class T>
+		void D2DDrawSolidRect(T* m_pDCRT, float x, float y, float cx, float cy, unsigned long ClrFill, float alpha = 1)
+		{
+			ID2D1SolidColorBrush* testBrush = NULL;
+			int hr = 0;
+
 			hr = m_pDCRT->CreateSolidColorBrush(
 				D2D1::ColorF(D2D1::ColorF(RGBToHex(ClrFill), alpha)),
 				&testBrush
@@ -285,21 +322,29 @@ namespace VertexUI
 				D2D1_RECT_F Rect = D2D1::Rect(
 					x, y, cx + x, cy + y
 				);
-					m_pDCRT->FillRectangle(Rect, testBrush);
+				m_pDCRT->FillRectangle(Rect, testBrush);
+				//testBrush->Release();
+				//*testBrush = NULL;
 				SafeRelease(&testBrush);
 			}
+			else
+			{
+				MessageBox(0, 0, 0, 0);
+			}
 		}
-		void CompD2DGdi(HWND hWnd, HDC hdc,D2DDRAWPANEL* DrawFun )
+		void CompD2DGdi(HWND hWnd, HDC hdc, D2DDRAWPANEL* DrawFun)
 		{
 			RECT rc;
 			GetClientRect(hWnd, &rc);
 			m_pDCRT->BindDC(hdc, &rc);
 			m_pDCRT->BeginDraw();
 			m_pDCRT->SetTransform(D2D1::Matrix3x2F::Identity());
-			DrawFun(hWnd,m_pDCRT);
+			DrawFun(hWnd, m_pDCRT);
 			m_pDCRT->EndDraw();
+
 		}
-		void CompGdiD2D(HWND hWnd, ID2D1HwndRenderTarget* hrt,std::function<DRAWPANEL> dwf)
+		template<class T>
+		void CompGdiD2D(HWND hWnd, T* hrt, std::function<DRAWPANEL> dwf)
 		{
 			RECT rc;
 			GetClientRect(hWnd, &rc);
@@ -322,7 +367,41 @@ namespace VertexUI
 			SafeRelease(&m_pGDIRT);
 		}
 		template<class T>
-		void D2DDrawText(T pRenderTarget, const wchar_t* Text,float x,float y,float cx ,float cy, float Size=18, unsigned long ClrFill=VERTEXUICOLOR_WHITE,const wchar_t* font = L"Segoe UI",float alpha=1,bool center=false)
+		void D2DDrawText(T pRenderTarget, const wchar_t* Text, int x, int y, int cx, int cy, float Size = 18, unsigned long ClrFill = VERTEXUICOLOR_WHITE, const wchar_t* font = L"Segoe UI", float alpha = 1, DWRITE_FONT_WEIGHT wid = DWRITE_FONT_WEIGHT_NORMAL)
+		{
+			IDWriteTextFormat* pTextFormat = NULL;
+			ID2D1SolidColorBrush* testBrush = NULL;
+			pRenderTarget->CreateSolidColorBrush(
+				D2D1::ColorF(D2D1::ColorF(RGBToHex(ClrFill), alpha)),
+				&testBrush
+			);
+			//create text format
+			pDWriteFactory->CreateTextFormat(
+				font,
+				NULL,
+				wid,
+				DWRITE_FONT_STYLE_NORMAL,
+				DWRITE_FONT_STRETCH_NORMAL,
+				Size,
+				L"",
+				&pTextFormat
+			);
+
+			D2D1_RECT_F layoutRect = D2D1::RectF(x, y, x + cx, y + cy);
+
+			//draw text
+			pRenderTarget->DrawText(
+				Text,
+				wcslen(Text),
+				pTextFormat,
+				layoutRect,
+				testBrush
+			);
+			SafeRelease(&pTextFormat);
+			SafeRelease(&testBrush);
+		}
+		template<class T>
+		void D2DDrawText2(T pRenderTarget, const wchar_t* Text, float x, float y, float cx, float cy, float Size = 18, unsigned long ClrFill = VERTEXUICOLOR_WHITE, const wchar_t* font = L"Segoe UI", float alpha = 1, bool center = false)
 		{
 			IDWriteTextFormat* pTextFormat = NULL;
 			ID2D1SolidColorBrush* testBrush = NULL;
@@ -342,7 +421,7 @@ namespace VertexUI
 				&pTextFormat
 			);
 			if (center == true)pTextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-			D2D1_RECT_F layoutRect = D2D1::RectF(x,y, x+cx,y+cy);
+			D2D1_RECT_F layoutRect = D2D1::RectF(x, y, x + cx, y + cy);
 
 			//draw text
 			pRenderTarget->DrawText(
@@ -388,13 +467,15 @@ namespace VertexUI
 
 
 		}
-		ID2D1HwndRenderTarget* pRT;
-		void CreateD2DPanel(HWND hWnd,D2DHWNDDRAWPANEL* dwf){
+		ID2D1HwndRenderTarget* pRT1;
+		std::unordered_map<HWND, ID2D1HwndRenderTarget*> pRts;
+		void CreateD2DPanel(HWND hWnd, D2DHWNDDRAWPANEL* dwf) {
 			RECT rc;
 			GetClientRect(hWnd, &rc);
+			ID2D1HwndRenderTarget* pRT = NULL;
 
 			// Create a Direct2D render target          
-			if (pRT == NULL)
+			if (pRT == NULL && pRts[hWnd]==nullptr)
 			{
 				D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties();
 				rtProps.usage = D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE;
@@ -408,17 +489,19 @@ namespace VertexUI
 					),
 					&pRT
 				);
+				pRts[hWnd] = pRT;
 			}
-			pRT->BeginDraw();
+			pRts[hWnd]->BeginDraw();
 
-			dwf(hWnd, pRT);
+			dwf(hWnd, pRts[hWnd]);
 
-			HRESULT hr = pRT->EndDraw();
-			if (FAILED(hr) || hr == D2DERR_RECREATE_TARGET)SafeRelease(&pRT);
+			HRESULT hr = pRts[hWnd]->EndDraw();
+			if (FAILED(hr) || hr == D2DERR_RECREATE_TARGET)SafeRelease(&pRts[hWnd]);
+			//SafeRelease(&pRT);
 		}
 		//GDI
 		//DrawRect
-		void DrawRect( HDC hdc, int x, int y, int sizex, int sizey, COLORREF cl)
+		void DrawRect(HDC hdc, int x, int y, int sizex, int sizey, COLORREF cl)
 		{
 			RECT mRc;
 			RectTypeConvert(mRc, x, y, sizex, sizey);
@@ -429,9 +512,9 @@ namespace VertexUI
 			SelectObject(hdc, bhb);
 			DeleteObject(hb);
 		}
-		void DrawRect(HWND h,HDC hdc, int x, int y, int sizex, int sizey, COLORREF cl)
+		void DrawRect(HWND h, HDC hdc, int x, int y, int sizex, int sizey, COLORREF cl)
 		{
-			DrawRect(hdc, x, y, sizex,sizey,cl);
+			DrawRect(hdc, x, y, sizex, sizey, cl);
 		}
 #define CreateRect(hWnd,hdc, x, y,sizex,sizey,cl) DrawRect(hWnd,hdc, x, y,sizex,sizey,cl)
 		void DrawHollowRect(HDC hdc, int x, int y, int cx, int cy, int p, COLORREF cl)
@@ -695,6 +778,27 @@ namespace VertexUI
 			SHFILEINFO SHFI;  ZeroMemory(&SHFI, sizeof(SHFI));  DWORD_PTR ret = ::SHGetFileInfo(strFilePath, 0, &SHFI, sizeof(SHFI),
 				SHGFI_ICON | (bLarge ? SHGFI_LARGEICON : SHGFI_SMALLICON));  if (ret != 0) { return SHFI.hIcon; }  return NULL;
 		}
+
+		HICON GetFileIcon2(const wchar_t* pszPath)
+		{
+			SHFILEINFO sfi;
+			if (!SHGetFileInfo(pszPath, 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX)) return NULL;
+
+			// 获取大号图像列表
+			IImageList* piml;
+
+			if (FAILED(SHGetImageList(SHIL_EXTRALARGE, IID_PPV_ARGS(&piml)))) return NULL;
+
+			// 提取图标
+			HICON hico;
+			piml->GetIcon(sfi.iIcon, ILD_TRANSPARENT, &hico);
+
+			// 清理资源
+			piml->Release();
+
+			return hico;
+
+		}
 		void DisplayIcon(HDC hdc, const wchar_t* path, int x, int y, int sz)
 		{
 			//正式代码
@@ -705,6 +809,215 @@ namespace VertexUI
 			if (hIcon != NULL)
 				DrawIconEx(hdc, x, y, hIcon, sz, sz, 0, NULL, DI_NORMAL);
 			DestroyIcon(hIcon);
+		}
+		template <typename T>
+		void D2DDisplayIcon(T hdc, const wchar_t* path, int x, int y, int sz)
+		{
+			ID2D1Bitmap* pBitmap = NULL;
+			if (std::wstring(path) == L"NULL" || std::wstring(path) == L"" || std::wstring(path) == L" ")
+				return;
+
+			HICON hIcon = GetFileIcon(path, 1);
+			if (!hIcon) return;
+
+			ICONINFO iconInfo;
+			GetIconInfo(hIcon, &iconInfo);
+
+			// 获取图标的位图信息
+			BITMAP bm;
+			GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bm);
+
+			// 创建一个 D2D 位图
+			D2D1_SIZE_U size = D2D1::SizeU(bm.bmWidth, bm.bmHeight);
+			D2D1_BITMAP_PROPERTIES bitmapProps = D2D1::BitmapProperties(
+				D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+
+			BYTE* pPixels = new BYTE[bm.bmWidthBytes * bm.bmHeight];
+			GetBitmapBits(iconInfo.hbmColor, bm.bmWidthBytes * bm.bmHeight, pPixels);
+
+			ID2D1Bitmap* d2dBitmap = nullptr;
+			hdc->CreateBitmap(size, pPixels, bm.bmWidthBytes, bitmapProps, &d2dBitmap);
+
+
+
+			// 绘制 D2D 位图
+			hdc->DrawBitmap(d2dBitmap, D2D1::RectF(x, y, x + sz, y + sz));
+
+			// 结束绘制
+			HRESULT hr = hdc->EndDraw();
+			if (FAILED(hr))
+			{
+				OutputDebugString(L"Failed to render icon.");
+			}
+
+			// 清理
+			delete[] pPixels;
+			d2dBitmap->Release();
+			DeleteObject(iconInfo.hbmColor);
+			DeleteObject(iconInfo.hbmMask);
+		}
+		ID2D1Bitmap* CreateIconBitmap(ID2D1RenderTarget* pRenderTarget, const wchar_t* path, int sz)
+		{
+			if (!pRenderTarget) return nullptr;
+
+			// 获取HICON
+			HICON hIcon = nullptr;
+			SHFILEINFO shfi = { 0 };
+			if (SHGetFileInfo(path, 0, &shfi, sizeof(shfi), SHGFI_ICON | SHGFI_LARGEICON)) {
+				hIcon = shfi.hIcon;
+			}
+
+			if (!hIcon) return nullptr;
+
+			// 创建32位DIB
+			HDC hdcScreen = GetDC(nullptr);
+			HDC hdcMem = CreateCompatibleDC(hdcScreen);
+
+			BITMAPINFO bmi = { 0 };
+			bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+			bmi.bmiHeader.biWidth = sz;
+			bmi.bmiHeader.biHeight = -sz;
+			bmi.bmiHeader.biPlanes = 1;
+			bmi.bmiHeader.biBitCount = 32;
+			bmi.bmiHeader.biCompression = BI_RGB;
+
+			BYTE* pBits = nullptr;
+			HBITMAP hBitmap = CreateDIBSection(hdcMem, &bmi, DIB_RGB_COLORS, (void**)&pBits, nullptr, 0);
+
+			HGDIOBJ hOld = SelectObject(hdcMem, hBitmap);
+			DrawIconEx(hdcMem, 0, 0, hIcon, sz, sz, 0, nullptr, DI_NORMAL);
+			SelectObject(hdcMem, hOld);
+
+			// 创建D2D位图
+			D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+				D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+			);
+
+			ID2D1Bitmap* pD2DBitmap = nullptr;
+			HRESULT hr = pRenderTarget->CreateBitmap(
+				D2D1::SizeU(sz, sz),
+				pBits,
+				sz * 4,
+				&props,
+				&pD2DBitmap
+			);
+
+			// 清理
+			DeleteObject(hBitmap);
+			DeleteDC(hdcMem);
+			ReleaseDC(nullptr, hdcScreen);
+
+			return pD2DBitmap;
+		}
+		int gByteWidth = 0;
+		int gD2DBmWid = 0;
+		int gD2DBmHei = 0;
+		BYTE* D2DGetIconByte(const wchar_t* path, int sz)
+		{
+
+			if (std::wstring(path) == L"NULL" || std::wstring(path) == L"" || std::wstring(path) == L" ")
+				return nullptr;
+
+			HICON hIcon = GetFileIcon2(path);
+			if (!hIcon) return nullptr;
+
+			ICONINFO iconInfo;
+			GetIconInfo(hIcon, &iconInfo);
+
+			// 获取图标的位图信息
+			BITMAP bm;
+			GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bm);
+
+
+			BYTE* pPixels = new BYTE[(bm.bmWidthBytes + 16) * (bm.bmHeight + 16)];
+
+			GetBitmapBits(iconInfo.hbmColor, (bm.bmWidthBytes) * (bm.bmHeight), pPixels);
+			gByteWidth = bm.bmWidthBytes;
+			gD2DBmWid = bm.bmWidth;
+			gD2DBmHei = bm.bmHeight;
+			/*
+			// 绘制 D2D 位图
+			hdc->DrawBitmap(d2dBitmap, D2D1::RectF(x, y, x + sz, y + sz));
+			//delete[] pPixels;
+			//d2dBitmap->Release();
+			*/
+			DeleteObject(iconInfo.hbmColor);
+			DeleteObject(iconInfo.hbmMask);
+			return pPixels;
+		}
+		template <typename T>
+		void D2DDrawBitmapFrompBm(T hrt, ID2D1Bitmap* pBm, int x, int y, int sz)
+		{
+			if (!hrt || !pBm) return;
+
+			ID2D1RenderTarget* pRenderTarget = nullptr;
+
+			// 根据不同的类型获取渲染目标
+			if constexpr (std::is_same_v<T, ID2D1HwndRenderTarget*> ||
+				std::is_same_v<T, ID2D1RenderTarget*>) {
+				pRenderTarget = static_cast<ID2D1RenderTarget*>(hrt);
+			}
+			else if constexpr (std::is_same_v<T, ID2D1DeviceContext*>) {
+				pRenderTarget = static_cast<ID2D1DeviceContext*>(hrt);
+			}
+			else {
+				// 对于其他类型，假设可以直接转换为ID2D1RenderTarget
+				pRenderTarget = static_cast<ID2D1RenderTarget*>(hrt);
+			}
+
+			if (!pRenderTarget) return;
+
+			// 创建目标矩形
+			D2D1_RECT_F destRect = D2D1::RectF(
+				static_cast<FLOAT>(x),
+				static_cast<FLOAT>(y),
+				static_cast<FLOAT>(x + sz),
+				static_cast<FLOAT>(y + sz)
+			);
+
+			// 创建源矩形（整个位图）
+			D2D1_SIZE_U bitmapSize = pBm->GetPixelSize();
+			D2D1_RECT_F sourceRect = D2D1::RectF(0, 0,
+				static_cast<FLOAT>(bitmapSize.width),
+				static_cast<FLOAT>(bitmapSize.height));
+
+			// 设置插值模式以获得更好的缩放效果
+			pRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+			// 绘制位图
+			pRenderTarget->DrawBitmap(
+				pBm,
+				destRect,
+				1.0f, // opacity
+				D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+				sourceRect
+			);
+		}
+
+		template <typename T>
+		void D2DDrawBitmapFromByte(T hdc, BYTE* pPixels, int x, int y, int sz)
+		{
+			int bp = gByteWidth;
+
+			// 创建一个 D2D 位图
+			D2D1_SIZE_U size = D2D1::SizeU(gD2DBmWid, gD2DBmHei);
+			D2D1_BITMAP_PROPERTIES bitmapProps = D2D1::BitmapProperties(
+				D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+
+
+			ID2D1Bitmap* d2dBitmap = nullptr;
+			hdc->CreateBitmap(size, pPixels, bp, bitmapProps, &d2dBitmap);
+
+
+
+			// 绘制 D2D 位图
+
+			hdc->DrawBitmap(d2dBitmap, D2D1::RectF(x, y, x + sz, y + sz), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1::RectF(0, 0, gD2DBmWid, gD2DBmHei));
+
+			// 结束绘制
+
+			// 清理
+			d2dBitmap->Release();
 		}
 		void CreatehIcon(HDC hdc, HICON hIcon, int x, int y, int sz)
 		{
@@ -749,7 +1062,7 @@ namespace VertexUI
 			SelectObject(hdc, hpen);
 			MoveToEx(hdc, rc.left + inframepos + 1, rc.top + inframepos + 1 + mdpos, NULL);
 			LineTo(hdc, rc.left + (x1 / 2) - inframepos, rc.top + (y1 / 2) - inframepos + mdpos);
-			MoveToEx(hdc,rc.right- (x1/2.5)-1, rc.top + inframepos + 1 + mdpos, NULL);
+			MoveToEx(hdc, rc.right - (x1 / 2.5) - 1, rc.top + inframepos + 1 + mdpos, NULL);
 			LineTo(hdc, rc.right - (x1 / 2) - inframepos - 1, rc.bottom - (y1 / 2) - inframepos + mdpos);
 			//MoveToEx(hdc, rc.left + inframepos + 1, rc.bottom - inframepos - 1, NULL);
 			//LineTo(hdc, rc.right - inframepos, rc.top + inframepos);
@@ -1044,7 +1357,7 @@ namespace VertexUI
 			else 	BitBlt(hdc, x, y, cx, cy, CachedDC, xOf, yOf, SRCCOPY);
 		}
 		//
-		void CreatePanel(HWND h, HDC hdc, DRAWPANEL DrawFun)
+		void CreatePanel(HWND h, HDC hdc, std::function<DRAWPANEL> DrawFun)
 		{
 			HDC         hMemDC;
 			HBITMAP     hBmpMem;
@@ -1153,6 +1466,7 @@ namespace VertexUI
 	};
 
 }
+
 
 namespace VertexUI::Panel
 {
@@ -1891,7 +2205,7 @@ namespace VertexUI::Panel
 		static int  ocx, ocy;
 		/*高斯模糊处理部分*/
 		HDC hMemDC = CreateCompatibleDC(hdc);
-		FinalBlur =_GaussianBlurFunc(hdc, vp.x, vp.y, vp.cx, vp.cy, a, true, b, true, th);
+		FinalBlur = _GaussianBlurFunc(hdc, vp.x, vp.y, vp.cx, vp.cy, a, true, b, true, th);
 		HBITMAP hPreBmp = (HBITMAP)SelectObject(hMemDC, FinalBlur);
 		::SetStretchBltMode(hdc, HALFTONE);
 		::SetBrushOrgEx(hdc, 0, 0, NULL);

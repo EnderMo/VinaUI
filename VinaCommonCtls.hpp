@@ -78,7 +78,7 @@ public:
 			nClr = RGB(nR, nG, nB);
 			D2DDrawRoundRect(hdc, x + num, y + num, cx - num * 2, cy - num * 2, nClr, 8, 1, 1.0f, VERTEXUICOLOR_MIDNIGHTPLUS);
 
-			D2DDrawText(hdc, txt.c_str(), x, (float)(y + cy / 2 - txtsz / 1.5), cx, cy, txtsz-num, txtClr, L"Segoe UI", 1, true);
+			D2DDrawText2(hdc, txt.c_str(), x, (float)(y + cy / 2 - txtsz / 1.5), cx, cy, txtsz-num, txtClr, L"Segoe UI", 1, true);
 		}
 		else if (this->IsHoverd==true)
 		{
@@ -119,7 +119,7 @@ public:
 			nClr = RGB(nR, nG, nB);
 			D2DDrawRoundRect(hdc, x - num, y - num, cx + num * 2, cy + num * 2, nClr, 8, 1, 1.0f + num, VERTEXUICOLOR_MIDNIGHTPLUS);
 
-			D2DDrawText(hdc, txt.c_str(), x, (float)(y + cy / 2 - txtsz / 1.5), cx, cy, txtsz, txtClr, L"Segoe UI", 1, true);
+			D2DDrawText2(hdc, txt.c_str(), x, (float)(y + cy / 2 - txtsz / 1.5), cx, cy, txtsz, txtClr, L"Segoe UI", 1, true);
 		}
 		else
 		{
@@ -164,7 +164,7 @@ public:
 				nClr = RGB(nR, nG, nB);
 			}
 			D2DDrawRoundRect(hdc, x - num, y - num, cx + num * 2, cy + num * 2, nClr, 8, 1, 1.0f, VERTEXUICOLOR_MIDNIGHTPLUS);
-			D2DDrawText(hdc, txt.c_str(), x,(float)(y+cy/2-txtsz/1.5), cx, cy, txtsz, txtClr,L"Segoe UI",1,true);
+			D2DDrawText2(hdc, txt.c_str(), x,(float)(y+cy/2-txtsz/1.5), cx, cy, txtsz, txtClr,L"Segoe UI",1,true);
 		}
 	}
 
@@ -172,7 +172,8 @@ public:
 	{
 		ap = 0;
 		Refresh(hWnd);
-		vinaFuncMap[_event.c_str()]();
+		func();
+		//if(func)vinaFuncMap[_event.c_str()]();
 		return 0;
 	}
 	virtual int OnMouseDown()

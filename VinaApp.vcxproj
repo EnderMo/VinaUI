@@ -152,6 +152,7 @@
     <ClInclude Include="VinaCommonCtls.hpp" />
     <ClInclude Include="VinaComponents.hpp" />
     <ClInclude Include="VinaInternalFunctionMapping.hpp" />
+    <ClInclude Include="VinaWindow.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="VertexUI\vui.parser\main.cpp" />
