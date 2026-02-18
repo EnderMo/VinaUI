@@ -17,7 +17,6 @@
 VinaUI 使用 `VinaWindow` 对象管理窗口生命周期。你可以直接实例化并设置初始参数。
 
 ```cpp
-#include <VertexUI/VertexUI.min.h>
 #include <VinaWindow.hpp>
 
 std::shared_ptr<VinaWindow> MainWindow = std::make_shared<VinaWindow>();
@@ -56,20 +55,27 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 VinaUI 的核心逻辑在于 Panel。它接受一个 Lambda 表达式。当窗口重绘时，此函数会被调用。
 
-> **注意**：控件建议定义为 static 或在外部初始化，以避免在每一帧刷新时重复创建对象。
+> **规范**：建议将 UI 变量封装在结构体或类中，通过 Lambda 捕获。
 
 ```cpp
-MainWindow->CreatePanel([](HWND hWnd, ID2D1HwndRenderTarget* hrt) {
+struct AppContext {
+    std::shared_ptr<VinaButton> btn = std::make_shared<VinaButton>();
+    std::shared_ptr<VinaEdit> edt = std::make_shared<VinaEdit>();
+};
+
+auto ctx = std::make_shared<AppContext>();
+
+MainWindow->CreatePanel([ctx](HWND hWnd, ID2D1HwndRenderTarget* hrt) {
     RECT rc;
     GetClientRect(hWnd, &rc);
 
-    // 绘制背景
+    // 绘制背景层
     D2DDrawSolidRect(hrt, 0, 0, rc.right, rc.bottom, VERTEXUICOLOR_DARKNIGHT);
     
-    // 在添加控件之前，必须将 Panel 与绘图句柄绑定。
+    // 绑定当前绘图句柄到 Panel (必须在 Add 控件之前执行)
     MainWindow->GetPanel()->Set(hWnd, hrt);
 
-    // TODO : 在此处添加控件
+    // 控件代码 
 });
 ```
 
@@ -81,30 +87,27 @@ MainWindow->CreatePanel([](HWND hWnd, ID2D1HwndRenderTarget* hrt) {
 #### 按钮 (VinaButton)
 
 ```cpp
-static auto btn = std::make_shared<VinaButton>();
-btn->Set(40, 60, 140, 40, L"Click", [] {
+ctx->btn->Set(40, 60, 140, 40, L"Click", [] {
     MessageBox(0, L"Hello VinaUI!", L"Tips", 0);
     return 0;
 });
-MainWindow->GetPanel()->Add(btn);
+MainWindow->GetPanel()->Add(ctx->btn);
 ```
 
 #### 输入框 (VinaEdit)
 
 ```cpp
-static auto edt = std::make_shared<VinaEdit>();
-if (edt->cx == 0) { // 简单的初始化检查
-    edt->Set(260, 180, 300, 35, L"请输入内容...");
+if (!ctx->edt->cx) { // 简单的初始化检查
+    ctx->edt->Set(260, 180, 300, 35, L"请输入内容...");
 }
-MainWindow->GetPanel()->Add(edt);
+MainWindow->GetPanel()->Add(ctx->edt);
 ```
 
 #### 开关 (VinaSwitch)
 
 ```cpp
-static auto sw = std::make_shared<VinaSwitch>();
-sw->Set(40, 190, 60, 30, {VERTEXUICOLOR_DARKEN}, [] {});
-MainWindow->GetPanel()->Add(sw);
+ctx->sw->Set(40, 190, 60, 30, {VERTEXUICOLOR_DARKEN}, [] {});
+MainWindow->GetPanel()->Add(ctx->sw);
 ```
 
 > **注意**：部分有滑动条的控件需要先使用 `SetParent()` 方法绑定 Panel。

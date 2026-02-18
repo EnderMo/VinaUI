@@ -1,6 +1,8 @@
 #pragma once
 #include "VinaComponents.hpp"
-
+/*
+本文件为旧版示例的一些辅助函数，实际使用时可删除。
+*/
 
 HANDLE hMyFont;
 HGLOBAL hFntMem;
@@ -8,6 +10,45 @@ HGLOBAL hFntMem;
 VertexUIInit;
 #define MAX_LOADSTRING 100
 
+#define MAX_PATH 260
+
+wchar_t LocalAppData[MAX_PATH] = L""; //Tag"\\"
+wchar_t LocalData[MAX_PATH] = L""; //Tag"\\"
+char LocalLFDataA[MAX_PATH] = ""; //Tag"\\"
+wchar_t LocalLFData[MAX_PATH] = L""; //Tag"\\"
+char LocalDataA[MAX_PATH] = ""; //Tag"\\"
+wchar_t LocalData2[MAX_PATH] = L"";//Tag "/"
+wchar_t LocalCache[MAX_PATH] = L""; //Tag"vui"
+char LocalCacheA[MAX_PATH] = ""; //Tag"vui"
+wchar_t LocalLFCache[MAX_PATH] = L""; //Tag"vui"
+char LocalLFCacheA[MAX_PATH] = ""; //Tag"vui"
+wchar_t LocalCache2[MAX_PATH] = L""; //Tag"vui //"
+wchar_t LocalRes[MAX_PATH] = L""; //Tag"\\"
+
+wchar_t LocalCom[MAX_PATH] = L"";
+wchar_t LocalCards[MAX_PATH] = L"";
+char LocalComA[MAX_PATH] = "";
+struct FontResourceDeleter {
+    void operator()(HANDLE h) const { if (h && h != INVALID_HANDLE_VALUE) RemoveFontMemResourceEx(h); }
+};
+using UniqueFontHandle = std::unique_ptr<void, FontResourceDeleter>;
+
+class AppResourceManager {
+public:
+    static std::vector<std::byte> LoadRawResource(HINSTANCE hInst, int resId, const std::wstring& type) {
+        HRSRC hRes = FindResource(hInst, MAKEINTRESOURCE(resId), type.c_str());
+        if (!hRes) return {};
+
+        HGLOBAL hData = LoadResource(hInst, hRes);
+        if (!hData) return {};
+
+        const void* pData = LockResource(hData);
+        size_t size = SizeofResource(hInst, hRes);
+
+        auto start = static_cast<const std::byte*>(pData);
+        return { start, start + size };
+    }
+};
 
 void GetAppdataPath(wchar_t* ud)
 {
