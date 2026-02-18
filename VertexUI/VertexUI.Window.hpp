@@ -547,35 +547,55 @@ namespace VertexUI
 
 					if (message == WM_MOVE)
 					{
-						RECT rc;
-						GetWindowRect(hWnd, &rc);
-						RECT crc;
-						GetClientRect(hWnd, &crc);
-						RECT src;
-						GetClientRect(ShadowWnd[hWnd], &src);
-						int n = src.right - crc.right;
-						SetWindowPos(ShadowWnd[hWnd], 0, rc.left - n / 2, rc.top - n / 2, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
-						return 0;
+						// 仅移动位置
+						if (ShadowWnd.find(hWnd) != ShadowWnd.end()) {
+							RECT rc;
+							GetWindowRect(hWnd, &rc);
+							RECT crc;
+							GetClientRect(hWnd, &crc);
+							RECT src;
+							GetClientRect(ShadowWnd[hWnd], &src);
+							int n = src.right - crc.right;
+							SetWindowPos(ShadowWnd[hWnd], 0, rc.left - n / 2, rc.top - n / 2, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+						}
+						// 必须调用原始过程，否则父窗口可能不知道自己被移动了
+						return CallWindowProc(originalWndProc[hWnd], hWnd, message, wParam, lParam);
 					}
 					if (message == WM_SIZE)
 					{
-						RECT rc;
-						GetWindowRect(hWnd, &rc);
-						RECT crc;
-						GetClientRect(hWnd, &crc);
-						RECT src;
-						GetClientRect(ShadowWnd[hWnd], &src);
-						int n = src.right - crc.right;
-						SetWindowPos(ShadowWnd[hWnd], 0, 0, 0, crc.right + n * 2, crc.bottom + n * 2, SWP_NOMOVE | SWP_NOACTIVATE);
-						return 0;
+						// 修复：当大小改变时，必须调用 Update 来重绘阴影位图，而不仅仅是 SetWindowPos
+						if (s_Shadowmap.find(hWnd) != s_Shadowmap.end()) {
+							s_Shadowmap[hWnd]->Update(hWnd);
+						}
+						// 必须调用原始过程，否则父窗口不会进行布局
+						return CallWindowProc(originalWndProc[hWnd], hWnd, message, wParam, lParam);
 					}
 					if (message == WM_DESTROY || message == WM_CLOSE || message == WM_QUIT)
 					{
-						ShowWindow(ShadowWnd[hWnd], SW_HIDE);
-						PostMessage(ShadowWnd[hWnd], 0xff5, 0, 0);
-						return 0;
+						if (ShadowWnd.find(hWnd) != ShadowWnd.end()) {
+							ShowWindow(ShadowWnd[hWnd], SW_HIDE);
+							PostMessage(ShadowWnd[hWnd], 0xff5, 0, 0);
+						}
+
+						// 修复：在窗口销毁时，必须还原窗口过程，否则后续消息或重复创建会导致 Crash
+						if (message == WM_DESTROY && originalWndProc.find(hWnd) != originalWndProc.end())
+						{
+							WNDPROC oldProc = originalWndProc[hWnd];
+							SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)oldProc);
+
+							// 清理 Map，防止野指针
+							originalWndProc.erase(hWnd);
+							ShadowWnd.erase(hWnd);
+							s_Shadowmap.erase(hWnd);
+
+							return CallWindowProc(oldProc, hWnd, message, wParam, lParam);
+						}
 					}
-					return CallWindowProc(originalWndProc[hWnd], hWnd, message, wParam, lParam);
+
+					if (originalWndProc.find(hWnd) != originalWndProc.end())
+						return CallWindowProc(originalWndProc[hWnd], hWnd, message, wParam, lParam);
+
+					return DefWindowProc(hWnd, message, wParam, lParam);
 				}
 			};
 			std::unordered_map<HWND, WNDPROC> DropShadow::originalWndProc;
@@ -604,18 +624,22 @@ namespace VertexUI
 
 			void DropShadow::Create(HWND hParentWnd)
 			{
-
-
-
 				ghWnd = CreateWindowEx(WS_EX_LAYERED | WS_EX_TRANSPARENT, ShadowClassName, NULL, WS_POPUPWINDOW, CW_USEDEFAULT, 0, 0, 0, hParentWnd, NULL, s_hInstance, NULL);
 				gStatus = SS_ENABLED;
 				m_hWnd = ghWnd;
-				Show(hParentWnd);
-				//SetWindowLongPtr(hParentWnd, GWLP_WNDPROC, (LONG_PTR)ParentProc);
-				LONG_PTR lp = SetWindowLongPtr(hParentWnd, GWLP_WNDPROC, (LONG_PTR)WndProc);
-				// Changes WNDPROC of the specified window
-				originalWndProc[hParentWnd] = (WNDPROC)lp;
+
+				// 修复：注册实例到 Map，以便 WndProc 中 WM_SIZE 可以调用 Update
+				s_Shadowmap[hParentWnd] = this;
 				ShadowWnd[hParentWnd] = ghWnd;
+
+				Show(hParentWnd);
+
+				// 修复：防止重复子类化导致无限递归或指针覆盖
+				if (originalWndProc.find(hParentWnd) == originalWndProc.end())
+				{
+					LONG_PTR lp = SetWindowLongPtr(hParentWnd, GWLP_WNDPROC, (LONG_PTR)WndProc);
+					originalWndProc[hParentWnd] = (WNDPROC)lp;
+				}
 			}
 
 

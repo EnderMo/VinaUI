@@ -2,7 +2,7 @@
  * @file vui.parser.basic.hpp
  * @author Haceau (haceau@qq.com)
  * @brief vui 解析器的通用基本类。
- * @version 0.1.0
+ * @version 0.2.0 (Modified for Vina syntax)
  * @date 2022-05-11
  * @copyright Copyright (c) 2022
  *
@@ -11,7 +11,7 @@
 #include <iterator>
 #include <utility>
 #ifndef VUI_PARSER_H_
-#define VUI_PARSET_H_
+#define VUI_PARSER_H_
 
 #include <cctype>
 #include <cinttypes>
@@ -23,6 +23,7 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <vector>
 
 namespace vui::parser
 {
@@ -114,11 +115,11 @@ namespace vui::parser
                 /// @brief 向前移动一位。
                 iterator& operator++() { ++pos_; return *this; }
             /// @brief 向前移动一位，返回移动前的迭代器。
-            iterator const& operator++(int) { auto it{ *this }; ++* this; return it; }
+            iterator const& operator++(int) { auto it{ *this }; ++*this; return it; }
             /// @brief 向后移动一位。
             iterator& operator--() { --pos_; return *this; }
             /// @brief 向后移动一位，返回移动前的迭代器。
-            iterator const& operator--(int) { auto it{ *this }; --* this; return *this; }
+            iterator const& operator--(int) { auto it{ *this }; --*this; return *this; }
             /// @brief 判断两个迭代器是否相等。
             bool operator==(iterator const& other) { return objs_.begin() == other.objs_.begin() && objs_.end() == other.objs_.end() && pos_ == other.pos_; }
             /// @brief 判断两个迭代器是否不相等。
@@ -179,6 +180,13 @@ namespace vui::parser
             order_.emplace_back(std::move(key));
         }
 
+        /// @brief 添加对象（右值引用）。
+        void add(string_type const& key, std::any&& value)
+        {
+            obj_[key] = std::move(value);
+            order_.emplace_back(std::move(key));
+        }
+
         /// @brief 获取数据顺序。
         std::vector<string_type> const& order() const
         {
@@ -224,16 +232,31 @@ namespace vui::parser
         using objects_type = std::unordered_map<string_type, object_type>;
 
         /// @brief 初始化器。
+    /// @param s 要解析的流。
+        template<typename T>
+        basic_parser(T const& s) noexcept // 保留旧的 const& 构造函数
+            : stream_(s) { } // 对于可拷贝的类型，这仍然是有效的
+
+        /// @brief 初始化器。
         /// @param s 要解析的流。
         template<typename T>
-        basic_parser(T const& s) noexcept
-            : stream_(s) { }
+        basic_parser(T&& s) noexcept // 新增移动构造函数
+            : stream_(std::forward<T>(s)) { } // 使用 std::forward 处理左值和右值
+
         /// @brief 初始化器。
         /// @param s 要解析的流。
         /// @param region 要解析的 region。
         template<typename T>
         basic_parser(T const& s, string_type const& region) noexcept
             : stream_(s)
+            , region_(region) { }
+
+        /// @brief 初始化器。
+        /// @param s 要解析的流。
+        /// @param region 要解析的 region。
+        template<typename T>
+        basic_parser(T&& s, string_type const& region) noexcept
+            : stream_(std::forward<T>(s))
             , region_(region) { }
 
         /// @brief 设置 region。
@@ -304,8 +327,7 @@ namespace vui::parser
         {
             objs_ = std::unordered_map<string_type, object_type>{};
             CharT c{};
-            string_type obj;
-            //stream_ >> std::noskipws;
+            stream_ >> std::noskipws;
             while ((!stream_.eof()) && (stream_ >> c))
             {
                 switch (c)
@@ -341,11 +363,11 @@ namespace vui::parser
                 /// @brief 向前移动一位。
                 iterator& operator++() { ++pos_; return *this; }
             /// @brief 向前移动一位，返回移动前的迭代器。
-            iterator const& operator++(int) { auto it{ *this }; ++* this; return it; }
+            iterator const& operator++(int) { auto it{ *this }; ++*this; return it; }
             /// @brief 向后移动一位。
             iterator& operator--() { --pos_; return *this; }
             /// @brief 向后移动一位，返回移动前的迭代器。
-            iterator const& operator--(int) { auto it{ *this }; --* this; return *this; }
+            iterator const& operator--(int) { auto it{ *this }; --*this; return *this; }
             /// @brief 判断两个迭代器是否相等。
             bool operator==(iterator const& other) { return objs_.begin() == other.objs_.begin() && objs_.end() == other.objs_.end() && pos_ == other.pos_; }
             /// @brief 判断两个迭代器是否不相等。
@@ -420,19 +442,61 @@ namespace vui::parser
             return true;
         }
 
+        bool parse_members(object_type& obj) noexcept
+        {
+            CharT c = skip_whitespace();
+            while (c != '}' && !stream_.eof())
+            {
+                /// 逗号处理
+                if (c == ',') {
+                    c = skip_whitespace();
+                    if (c == '}') break;
+                }
+
+                /// 读取 Key
+                string_type key;
+                /// 读取直到遇到分隔符 (、:、{ 或空白
+                while (c != '(' && c != ':' && c != '{' && !isspace(c) && c != ',' && c != '}') {
+                    key += c;
+                    stream_ >> c;
+                }
+
+                /// 跳过键名和分隔符之间的空白
+                while (isspace(c)) stream_ >> c;
+
+                CharT separator = c;
+                std::any value;
+
+                if (separator == '(') {
+                    if (!read_value(value, c, [](CharT x) { return x == ')'; })) return false;
+                    c = skip_whitespace();
+                }
+                else if (separator == ':') {
+                    if (!read_value(value, c, [](CharT x) { return x == ',' || x == '}'; })) return false;
+                }
+                else if (separator == '{') {
+                    object_type nested_obj;
+                    if (!parse_members(nested_obj)) return false;
+                    value = nested_obj;
+                    c = skip_whitespace();
+                }
+                else {
+                    return false;
+                }
+
+                obj.add(key, std::move(value));
+            }
+            return true;
+        }
+
         bool parse_object(CharT c) noexcept
         {
             string_type name{ c };
             if (!read_to('{', name)) return false;
+
             object_type obj;
-            do
-            {
-                string_type first;
-                if (!read_to('(', first)) return false;
-                std::any second;
-                if (!read_value(second)) return false;
-                obj.add(first, second);
-            } while ((c = skip_whitespace()) != '}');
+            if (!parse_members(obj)) return false;
+
             while (objs_->count(name)) name += '^';
             objs_.value()[name] = obj;
             if (!is_virtual_object(name))
@@ -463,29 +527,53 @@ namespace vui::parser
             }
             return !stream_.eof();
         }
-
-        bool read_value(std::any& out) noexcept
+        /// 新的read_value
+        bool read_value(std::any& out, CharT& c, std::function<bool(CharT)> is_end) noexcept
         {
             bool is_integer = true, is_decimal = true;
 
-            CharT c{ skip_whitespace() };
+            stream_ >> c;
+            while (isspace(c)) stream_ >> c;
+
             string_type s{};
             bool is_negative{ false };
-            while ((c != ')') && (!stream_.eof()))
+
+
+            while (!is_end(c) && (!stream_.eof()))
             {
+                // *** 修复：值终止检查（针对非引号包裹的值）***
+                if (!s.empty() && isspace(c)) {
+                    // 如果 s 中已有内容（说明值已经开始读取），且当前字符是空白，则认为值已经结束。
+                    stream_ >> c;
+                    while (isspace(c) && !stream_.eof()) {
+                        stream_ >> c;
+                    }
+                    break; // 跳出主循环
+                }
+                // ****************************************
+
                 if (!isdigit(c))
                 {
                     if (c == '"')
                     {
                         if (s.empty() || s.back() != '\\')
                         {
-                            is_integer = is_decimal = false;
-                            bool flag = false;
-                            if (!read_string(s, flag)) return false; else if (flag) break;
+                            is_integer = is_decimal = false; // 明确标记为字符串
+
+                            s += c;
+                            stream_ >> c;
+                            while ((c != '"' || s.back() == '\\') && !stream_.eof()) {
+                                s += c;
+                                stream_ >> c;
+                            }
+                            s += c;
+                            stream_ >> c;
+                            continue;
                         }
-                        else
+                        else {
                             s.back() = '"';
-                        c = '\0';
+                            c = '\0';
+                        }
                     }
                     else if (!is_negative && c == '-') is_negative = true;
                     else
@@ -497,16 +585,28 @@ namespace vui::parser
                 s += c;
                 stream_ >> c;
             }
-            if (stream_.eof()) return false;
+
+            // --- 类型转换 ---
             if (s.empty()) out = "";
-            else if (is_integer) out = std::stoi(s);
-            else if (is_decimal) out = std::stod(s);
-            else if (s.size() >= 4 && s[0] == 't' && s[1] == 'r' && s[2] == 'u' && s[3] == 'e') out = true;
-            else if (s.size() >= 5 && s[0] == 'f' && s[1] == 'a' && s[2] == 'l' && s[3] == 's' && s[4] == 'e') out = false;
+            // 如果是带引号的字符串，剥离引号。例如 "abc" -> abc。
+            // 注意：此时 std::any 中存储的是 L"abc"，不含引号。
+            else if (s.front() == '"' && s.back() == '"') {
+                if (s.length() >= 2) out = s.substr(1, s.length() - 2);
+                else out = "";
+            }
+            // 数字类型判断：如果 is_integer/is_decimal 仍为 true，则转换为 int/double
+            else if (is_integer && !s.empty() && s != string_type{ L"-" }) out = std::stoi(s);
+            else if (is_decimal && !s.empty() && s != string_type{ L"." }&& s != string_type{ L"-." }) out = std::stod(s);
+            // 布尔值判断
+            else if (s == string_type{ L"true" }) out = true;
+            else if (s == string_type{ L"false" }) out = false;
+            // 默认解析为字符串
             else out = s;
+
             return true;
         }
 
+        /// 兼容旧read_string
         bool read_string(string_type& out, bool& flag) noexcept
         {
             CharT c{ };
@@ -548,4 +648,4 @@ namespace vui::parser
     }
 }
 
-#endif // VUI_PARSET_H_
+#endif // VUI_PARSER_H_

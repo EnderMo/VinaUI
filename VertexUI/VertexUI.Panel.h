@@ -19,6 +19,8 @@
 #include <functional>
 #include <map>
 #include <gdiplus.h>
+#include <imm.h>
+#pragma comment(lib, "imm32.lib")
 using namespace Gdiplus;
 #pragma comment(lib, "gdiplus.lib") 
 GdiplusStartupInput gdiplusStartupInput;
@@ -347,6 +349,186 @@ namespace VertexUI
 			}
 		}
 
+		HRESULT D2DRenderCurrentScaledMipmap(ID2D1HwndRenderTarget* hrt, float x, float y, float cx, float cy, float scale, float opacity)
+		{
+			if (!hrt) return E_INVALIDARG;
+
+			// 确保 scale 是缩小比例 (0 < scale < 1)
+			if (scale > 1.0f) scale = 1.0f / scale;
+			if (scale <= 0.0f) scale = 0.1f; // 防止除零或负数
+
+			// 限制 opacity 在 [0, 1] 范围内
+			if (opacity < 0.0f) opacity = 0.0f;
+			if (opacity > 1.0f) opacity = 1.0f;
+
+			HRESULT hr = S_OK;
+
+			// 定义源区域
+			D2D1_SIZE_U pixelSize = hrt->GetPixelSize();
+			D2D1_RECT_U srcRect = D2D1::RectU(
+				static_cast<UINT32>(x),
+				static_cast<UINT32>(y),
+				static_cast<UINT32>(x + cx),
+				static_cast<UINT32>(y + cy)
+			);
+
+			if (srcRect.right > pixelSize.width) srcRect.right = pixelSize.width;
+			if (srcRect.bottom > pixelSize.height) srcRect.bottom = pixelSize.height;
+			if (srcRect.left >= srcRect.right || srcRect.top >= srcRect.bottom) return S_OK;
+
+			float scaledWidth = cx * scale;
+			float scaledHeight = cy * scale;
+
+		
+			static ID2D1Bitmap* pScreenCapture = NULL;
+			static ID2D1BitmapRenderTarget* pSmallRT = NULL;
+
+		
+			bool needRecreate = false;
+
+			if (pScreenCapture) {
+				D2D1_SIZE_F size = pScreenCapture->GetSize();
+				// 截取区域大小改变则重建
+				if (static_cast<UINT32>(size.width) != (srcRect.right - srcRect.left) ||
+					static_cast<UINT32>(size.height) != (srcRect.bottom - srcRect.top)) {
+					needRecreate = true;
+				}
+			}
+			else {
+				needRecreate = true;
+			}
+
+			if (needRecreate) {
+				SafeRelease(&pScreenCapture);
+				SafeRelease(&pSmallRT);
+
+				D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(hrt->GetPixelFormat());
+				D2D1_SIZE_U captureSize = D2D1::SizeU(srcRect.right - srcRect.left, srcRect.bottom - srcRect.top);
+				hr = hrt->CreateBitmap(captureSize, props, &pScreenCapture);
+			}
+
+			// 确保 pSmallRT 也被正确创建/重建
+			if (SUCCEEDED(hr) && !pSmallRT) {
+				// 注意：这里 pSmallRT 的大小应该根据 scaledWidth/Height 动态调整
+				// 为了简单起见，如果 scale 变动频繁，这里会导致频繁重建。
+				// 假设 scale 相对固定。
+				D2D1_SIZE_F smallSize = D2D1::SizeF(scaledWidth, scaledHeight);
+				hr = hrt->CreateCompatibleRenderTarget(smallSize, &pSmallRT);
+			}
+			else if (pSmallRT) {
+				// 检查 SmallRT 尺寸是否匹配当前的缩放需求
+				D2D1_SIZE_F currentSize = pSmallRT->GetSize();
+				if (std::abs(currentSize.width - scaledWidth) > 1.0f || std::abs(currentSize.height - scaledHeight) > 1.0f) {
+					SafeRelease(&pSmallRT);
+					D2D1_SIZE_F smallSize = D2D1::SizeF(scaledWidth, scaledHeight);
+					hr = hrt->CreateCompatibleRenderTarget(smallSize, &pSmallRT);
+				}
+			}
+
+		
+
+			if (SUCCEEDED(hr) && pScreenCapture)
+			{
+	
+				hr = pScreenCapture->CopyFromRenderTarget(&D2D1::Point2U(0, 0), hrt, &srcRect);
+			}
+
+			// 缩小
+			if (SUCCEEDED(hr) && pSmallRT)
+			{
+				pSmallRT->BeginDraw();
+				pSmallRT->Clear(D2D1::ColorF(0, 0.0f));
+
+				pSmallRT->DrawBitmap(
+					pScreenCapture,
+					D2D1::RectF(0, 0, scaledWidth, scaledHeight),
+					opacity,
+					D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+					NULL
+				);
+
+				hr = pSmallRT->EndDraw();
+			}
+
+			// 获取缩小后的 Bitmap
+			ID2D1Bitmap* pSmallBitmap = NULL;
+			if (SUCCEEDED(hr) && pSmallRT)
+			{
+				hr = pSmallRT->GetBitmap(&pSmallBitmap);
+			}
+
+			// 放大
+			if (SUCCEEDED(hr) && pSmallBitmap)
+			{
+				hrt->DrawBitmap(
+					pSmallBitmap,
+					D2D1::RectF(x, y, x + cx/gScale, y + cy/gScale),
+					opacity,
+					D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+					NULL
+				);
+			}
+
+			// 清理资源
+			// pSmallBitmap 是每次 GetBitmap 产生的，必须释放
+			SafeRelease(&pSmallBitmap);
+
+		
+			if (FAILED(hr)) {
+				SafeRelease(&pScreenCapture);
+				SafeRelease(&pSmallRT);
+			}
+
+			return hr;
+		}
+
+		template <class T>
+		void D2DCreateQuickBlur(T* h, float x, float y, float cx, float cy, float rad)
+		{
+			for (int i = 0; i < rad; i++)
+			{
+				int n = 3;
+				if (gScale < 1.25)n = 2;
+				float o = 0.9f;
+				if (i > 8) { n = 4; o = 0.8; }
+				if (i > 14) { n = 5; o = 0.8; }
+				if (i > 18) { n = 8; o = 0.8; }
+				if (i < 3) { n = 3; o = 0.5; }
+				if (i < 2) { n = 3; o = 0.3; }
+				D2DRenderCurrentScaledMipmap(h, x, y, cx, cy, n, o);
+			}
+		}
+		template <class T>
+		void D2DCreateQuickBlur2(T* h, float x, float y, float cx, float cy, float rad)
+		{
+			for (int i = 0; i < rad; i++)
+			{
+				int n = 4;
+				if (gScale < 1.25)n = 2;
+				float o = 0.9f;
+				if (i > 8) { n = 4; o = 0.9; }
+				if (i < 3) { n = 3; o = 0.8; }
+				if (i < 2) { n = 3; o = 0.3; }
+				D2DRenderCurrentScaledMipmap(h, x, y, cx, cy, n, o);
+			}
+		}
+		template <class T>
+		void D2DCreateQuickHeavyBlur(T* h, float x, float y, float cx, float cy, float rad)
+		{
+			for (int i = 0; i < rad; i++)
+			{
+				int n = 3;
+				if (gScale < 1.25)n = 2;
+				float o = 0.9f;
+				if (i > 5) { n = 4; o = 0.8; }
+				if (i > 8) { n = 8; o = 0.8; }
+				if (i > 12) { n = 16; o = 0.8; }
+				if (i > 16) { n = 32; o = 0.8; }
+				if (i < 3) { n = 3; o = 0.5; }
+				if (i < 2) { n = 3; o = 0.3; }
+				D2DRenderCurrentScaledMipmap(h, x, y, cx, cy, n, o);
+			}
+		}
 		template<class T>
 		void D2DDrawRoundRect(T* m_pDCRT, float x, float y, float cx, float cy, unsigned long ClrFill, float radius, float alpha = 1, float border = 0, unsigned long borderColor = 0, float borderAlphaSpecial = 0, bool OnlyBorder = false)
 		{
@@ -409,6 +591,72 @@ namespace VertexUI
 				}
 				SafeRelease(&testBrush);
 				SafeRelease(&testBrushOut);
+			}
+		}
+		template<class T>
+		void D2DDrawDashedRoundRect(T* m_pDCRT, float x, float y, float cx, float cy, unsigned long ClrFill, float radius, float alpha = 1, float border = 0, unsigned long borderColor = 0, float borderAlphaSpecial = 0, bool OnlyBorder = false)
+		{
+			int hr = 0;
+			ID2D1SolidColorBrush* testBrush = NULL;
+			hr = m_pDCRT->CreateSolidColorBrush(
+				D2D1::ColorF(D2D1::ColorF(RGBToHex(ClrFill), alpha)),
+				&testBrush
+			);
+
+			ID2D1SolidColorBrush* testBrushOut = NULL;
+			float ba = (borderAlphaSpecial != 0) ? borderAlphaSpecial : alpha;
+			hr = m_pDCRT->CreateSolidColorBrush(
+				D2D1::ColorF(D2D1::ColorF(RGBToHex(borderColor), ba)),
+				&testBrushOut
+			);
+
+			if (SUCCEEDED(hr))
+			{
+				// 1. 获取 ID2D1Factory 以创建 StrokeStyle
+				ID2D1Factory* pFactory = NULL;
+				m_pDCRT->GetFactory(&pFactory);
+
+				// 2. 定义虚线样式
+				ID2D1StrokeStyle* pStrokeStyle = NULL;
+				if (pFactory)
+				{
+					pFactory->CreateStrokeStyle(
+						D2D1::StrokeStyleProperties(
+							D2D1_CAP_STYLE_FLAT,    // 线端点样式
+							D2D1_CAP_STYLE_FLAT,    // 线端点样式
+							D2D1_CAP_STYLE_ROUND,   // 结合点样式
+							D2D1_LINE_JOIN_MITER,
+							5.0f,
+							D2D1_DASH_STYLE_DASH,   // 这里设置为虚线 (Dash)
+							0.0f
+						),
+						NULL, 0,
+						&pStrokeStyle
+					);
+				}
+
+				D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(
+					D2D1::RectF(x, y, cx + x, cy + y),
+					radius,
+					radius
+				);
+
+				// 3. 在绘制时传入 pStrokeStyle
+				if (border > 0)
+				{
+					m_pDCRT->DrawRoundedRectangle(roundedRect, testBrushOut, border, pStrokeStyle);
+				}
+
+				if (OnlyBorder == false)
+				{
+					m_pDCRT->FillRoundedRectangle(roundedRect, testBrush);
+				}
+
+				// 释放资源
+				SafeRelease(&testBrush);
+				SafeRelease(&testBrushOut);
+				SafeRelease(&pStrokeStyle);
+				SafeRelease(&pFactory); // GetFactory 增加引用计数，视具体实现可能需要释放
 			}
 		}
 		template<class T>
@@ -500,6 +748,72 @@ namespace VertexUI
 			SafeRelease(&pLayer);
 
 			return;
+		}
+		void D2DDrawDynamicLightArea(ID2D1HwndRenderTarget* pRT, float x, float y, float cx, float cy, float rr, unsigned long backgroundClr, unsigned long lightClr, float bgAlpha, float lightAlpha)
+		{
+			// 1. 获取鼠标位置
+			POINT pt;
+			GetCursorPos(&pt);
+			ScreenToClient(pRT->GetHwnd(), &pt);
+			pt.x /= gScale; pt.y /= gScale;
+
+			// --- 增强版颜色转换辅助函数 ---
+			// 指定颜色和特定的 alpha 值
+			auto GetD2DColor = [](unsigned long clr, float alphaOverride) -> D2D1_COLOR_F {
+				return D2D1::ColorF(
+					GetRValue(clr) / 255.0f,
+					GetGValue(clr) / 255.0f,
+					GetBValue(clr) / 255.0f,
+					alphaOverride // 直接使用外部传入的独立 Alpha
+				);
+				};
+
+			// 2. 定义内部绘制逻辑
+			auto drawLightEffect = [&](HWND hWnd, ID2D1HwndRenderTarget* rt, float _x, float _y, float _cx, float _cy) {
+
+				// --- A. 绘制背景层 ---
+				ID2D1SolidColorBrush* pBackBrush = nullptr;
+				rt->CreateSolidColorBrush(GetD2DColor(backgroundClr, bgAlpha), &pBackBrush);
+				rt->FillRectangle(D2D1::RectF(_x, _y, _x + _cx, _y + _cy), pBackBrush);
+
+				// --- B. 绘制光源层 ---
+				ID2D1GradientStopCollection* pGradientStops = nullptr;
+				D2D1_GRADIENT_STOP stops[2];
+
+				// 中心点：使用光源颜色和光源透明度
+				stops[0].color = GetD2DColor(lightClr, lightAlpha);
+				stops[0].position = 0.0f;
+
+				// 边缘点：颜色设为光源色或背景色均可，但 Alpha 必须设为 0 (或极低) 
+				// 这样光源才会“熄灭”并露出下方的背景层
+				stops[1].color = GetD2DColor(lightClr, 0.0f);
+				stops[1].position = 1.0f;
+
+				rt->CreateGradientStopCollection(stops, 2, &pGradientStops);
+
+				ID2D1RadialGradientBrush* pRadialBrush = nullptr;
+				float lightRadius = _cx * 0.8f; // 可根据需要调整光源范围
+
+				rt->CreateRadialGradientBrush(
+					D2D1::RadialGradientBrushProperties(
+						D2D1::Point2F((float)pt.x, (float)pt.y),
+						D2D1::Point2F(0, 0),
+						lightRadius, lightRadius),
+					pGradientStops,
+					&pRadialBrush
+				);
+
+				// 填充光源（此时它会叠加在背景层之上）
+				rt->FillRectangle(D2D1::RectF(_x, _y, _x + _cx, _y + _cy), pRadialBrush);
+
+				// 释放资源
+				SafeRelease(&pRadialBrush);
+				SafeRelease(&pGradientStops);
+				SafeRelease(&pBackBrush);
+				};
+
+			// 4. 调用裁剪模板
+			D2DDrawInClippedRoundRect<ID2D1HwndRenderTarget*>(pRT->GetHwnd(), pRT, x, y, cx, cy, rr, drawLightEffect);
 		}
 		template<class T>
 		void D2DDrawText(T pRenderTarget, const wchar_t* Text, float x, float y, int cx, int cy, float Size = 18, unsigned long ClrFill = VERTEXUICOLOR_WHITE, const wchar_t* font = L"Segoe UI", float alpha = 1, DWRITE_FONT_WEIGHT wid = DWRITE_FONT_WEIGHT_NORMAL)
@@ -603,6 +917,233 @@ namespace VertexUI
 			SafeRelease(&pTextFormat);
 			SafeRelease(&testBrush);
 		}
+
+		// 辅助函数：查找所有 :...: 模式的匹配
+		std::vector<std::pair<size_t, size_t>> FindIconPatterns(const std::wstring& text) {
+			std::vector<std::pair<size_t, size_t>> matches;
+			size_t pos = 0;
+			while (pos < text.length()) {
+				size_t start = text.find(L':', pos);
+				if (start == std::wstring::npos) break;
+
+				size_t end = text.find(L':', start + 1);
+				if (end == std::wstring::npos) break;
+
+				// 检查是否是有效的模式，中间应该有内容
+				if (end > start + 1) {
+					matches.push_back({ start, end });
+				}
+				pos = end + 1;
+			}
+			return matches;
+		}
+
+		template<class T>
+		void D2DDrawText4(T pRenderTarget, const wchar_t* Text, float x, float y, float cx, float cy,
+			float Size = 18, unsigned long ClrFill = VERTEXUICOLOR_WHITE,
+			const wchar_t* font = L"Segoe UI", float alpha = 1, bool center = false,
+			const wchar_t* iconFont = L"Font Awesome 6 Free Solid") // 添加图标字体参数
+		{
+			if (!Text) return;
+			if (cx < 5 || cy == 5)return;
+
+			std::wstring fullText = Text;
+			auto iconMatches = FindIconPatterns(fullText);
+
+			// 创建默认字体格式
+			IDWriteTextFormat* pDefaultFormat = NULL;
+			pDWriteFactory->CreateTextFormat(
+				font,
+				NULL,
+				DWRITE_FONT_WEIGHT_NORMAL,
+				DWRITE_FONT_STYLE_NORMAL,
+				DWRITE_FONT_STRETCH_NORMAL,
+				Size,
+				L"",
+				&pDefaultFormat
+			);
+
+			// 创建图标字体格式
+			IDWriteTextFormat* pIconFormat = NULL;
+			pDWriteFactory->CreateTextFormat(
+				iconFont,
+				NULL,
+				DWRITE_FONT_WEIGHT_NORMAL,
+				DWRITE_FONT_STYLE_NORMAL,
+				DWRITE_FONT_STRETCH_NORMAL,
+				Size,
+				L"",
+				&pIconFormat
+			);
+
+			if (center) pDefaultFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+			if (center) pIconFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+
+			// 创建画刷
+			ID2D1SolidColorBrush* pBrush = NULL;
+			pRenderTarget->CreateSolidColorBrush(
+				D2D1::ColorF(D2D1::ColorF(RGBToHex(ClrFill), alpha)),
+				&pBrush
+			);
+
+			D2D1_RECT_F layoutRect = D2D1::RectF(x, y, x + cx, y + cy);
+
+			// 如果没有图标匹配，直接绘制整个文本
+			if (iconMatches.empty()) {
+				pRenderTarget->DrawText(
+					Text,
+					wcslen(Text),
+					pDefaultFormat,
+					layoutRect,
+					pBrush
+				);
+			}
+			else {
+				// 使用 IDWriteTextLayout 进行复杂文本渲染
+				IDWriteTextLayout* pTextLayout = NULL;
+				pDWriteFactory->CreateTextLayout(
+					fullText.c_str(),
+					fullText.length(),
+					pDefaultFormat,
+					cx,  // max width
+					cy,   // max height
+					&pTextLayout
+				);
+
+				// 为每个图标范围设置不同的字体
+				for (const auto& match : iconMatches) {
+					DWRITE_TEXT_RANGE range;
+					range.startPosition = static_cast<UINT32>(match.first);
+					range.length = static_cast<UINT32>(match.second - match.first + 1); // 包含两个冒号
+					pTextLayout->SetFontFamilyName(iconFont, range);
+				}
+
+				pRenderTarget->DrawTextLayout(
+					D2D1::Point2F(x, y),
+					pTextLayout,
+					pBrush
+				);
+
+				SafeRelease(&pTextLayout);
+			}
+
+			SafeRelease(&pDefaultFormat);
+			SafeRelease(&pIconFormat);
+			SafeRelease(&pBrush);
+		}
+
+		template<class T>
+		void D2DDrawText4_1(T pRenderTarget, const wchar_t* Text, float x, float y, float cx, float cy,
+			float Size = 18, unsigned long ClrFill = VERTEXUICOLOR_WHITE,
+			const wchar_t* font = L"Segoe UI", float alpha = 1, bool center = false,
+			const wchar_t* iconFont = L"Font Awesome 6 Free Solid")
+		{
+			if (!Text || !pRenderTarget) return;
+			if (cx < 5 || cy < 5) return;
+
+			std::wstring fullText = Text;
+			auto iconMatches = FindIconPatterns(fullText);
+
+			// 1. 创建半粗体格式，样式改为 NORMAL (不再使用 OBLIQUE)
+			IDWriteTextFormat* pDefaultFormat = NULL;
+			pDWriteFactory->CreateTextFormat(
+				font,
+				NULL,
+				DWRITE_FONT_WEIGHT_SEMI_BOLD,
+				DWRITE_FONT_STYLE_NORMAL, // 这里改回正常，后面用矩阵倾斜
+				DWRITE_FONT_STRETCH_NORMAL,
+				Size,
+				L"",
+				&pDefaultFormat
+			);
+
+			// 2. 创建图标字体格式
+			IDWriteTextFormat* pIconFormat = NULL;
+			pDWriteFactory->CreateTextFormat(
+				iconFont,
+				NULL,
+				DWRITE_FONT_WEIGHT_NORMAL,
+				DWRITE_FONT_STYLE_NORMAL,
+				DWRITE_FONT_STRETCH_NORMAL,
+				Size,
+				L"",
+				&pIconFormat
+			);
+
+			if (center) {
+				pDefaultFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+				pIconFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+			}
+
+			// 3. 创建画刷
+			ID2D1SolidColorBrush* pBrush = NULL;
+			pRenderTarget->CreateSolidColorBrush(
+				D2D1::ColorF(RGBToHex(ClrFill), alpha),
+				&pBrush
+			);
+
+			// --- 矩阵变换核心部分 ---
+			D2D1_MATRIX_3X2_F oldMatrix;
+			pRenderTarget->GetTransform(&oldMatrix);
+
+			// 计算倾斜中心：如果是左对齐，中心在 (x, y + Size/2)
+			// 如果是居中对齐，中心在 (x + cx/2, y + cy/2)
+			D2D1_POINT_2F skewCenter = center ?
+				D2D1::Point2F(x + cx / 2.0f, y + cy / 2.0f) :
+				D2D1::Point2F(x, y + Size / 2.0f);
+
+			// -12.0f 是倾斜角度，中文建议在 -10.0f 到 -15.0f 之间
+			D2D1_MATRIX_3X2_F skewMatrix = D2D1::Matrix3x2F::Skew(-10.0f, 0.0f, skewCenter);
+
+			// 应用变换
+			pRenderTarget->SetTransform(skewMatrix * oldMatrix);
+			// -----------------------
+
+			D2D1_RECT_F layoutRect = D2D1::RectF(x, y, x + cx, y + cy);
+
+			if (iconMatches.empty()) {
+				pRenderTarget->DrawText(
+					Text,
+					(UINT32)wcslen(Text),
+					pDefaultFormat,
+					layoutRect,
+					pBrush
+				);
+			}
+			else {
+				IDWriteTextLayout* pTextLayout = NULL;
+				pDWriteFactory->CreateTextLayout(
+					fullText.c_str(),
+					(UINT32)fullText.length(),
+					pDefaultFormat,
+					cx,
+					cy,
+					&pTextLayout
+				);
+
+				for (const auto& match : iconMatches) {
+					DWRITE_TEXT_RANGE range;
+					range.startPosition = static_cast<UINT32>(match.first);
+					range.length = static_cast<UINT32>(match.second - match.first + 1);
+					pTextLayout->SetFontFamilyName(iconFont, range);
+				}
+
+				pRenderTarget->DrawTextLayout(
+					D2D1::Point2F(x, y),
+					pTextLayout,
+					pBrush
+				);
+
+				SafeRelease(&pTextLayout);
+			}
+
+			// 恢复原始变换，防止影响后续绘制
+			pRenderTarget->SetTransform(oldMatrix);
+
+			SafeRelease(&pDefaultFormat);
+			SafeRelease(&pIconFormat);
+			SafeRelease(&pBrush);
+		}
 		void CompD2DDrawRoundRect(HWND hWnd, HDC hdc, int x, int y, int cx, int cy, unsigned long ClrFill, int radius, float alpha = 1, int border = 0, unsigned long borderColor = 0, float borderAlphaSpecial = 0, bool OnlyBorder = false)
 		{
 			// Create a DC render target.
@@ -638,7 +1179,7 @@ namespace VertexUI
 		}
 		ID2D1HwndRenderTarget* pRT1;
 		std::unordered_map<HWND, ID2D1HwndRenderTarget*> pRts;
-		void CreateD2DPanel(HWND hWnd, D2DHWNDDRAWPANEL* dwf) {
+		void CreateD2DPanel(HWND hWnd, std::function<void(HWND, ID2D1HwndRenderTarget*)> dwf) {
 			RECT rc;
 			GetClientRect(hWnd, &rc);
 			ID2D1HwndRenderTarget* pRT = NULL;
@@ -668,6 +1209,251 @@ namespace VertexUI
 			if (FAILED(hr) || hr == D2DERR_RECREATE_TARGET)SafeRelease(&pRts[hWnd]);
 			//SafeRelease(&pRT);
 		}
+		template <class T>
+		HRESULT LoadBitmapFromFile(
+			T* pRenderTarget,
+			IWICImagingFactory* pIWICFactory,
+			const wchar_t* uri,
+			int x, int y, int cx, int cy
+		)
+		{
+			ID2D1Bitmap* bmp;
+			IWICBitmapDecoder* pDecoder = NULL;
+			IWICBitmapFrameDecode* pSource = NULL;
+			IWICStream* pStream = NULL;
+			IWICFormatConverter* pConverter = NULL;
+			IWICBitmapScaler* pScaler = NULL;
+
+			HRESULT hr = pIWICFactory->CreateDecoderFromFilename(
+				uri,
+				NULL,
+				GENERIC_READ,
+				WICDecodeMetadataCacheOnLoad,
+				&pDecoder
+			);
+			if (SUCCEEDED(hr))
+			{
+				// Create the initial frame.
+				hr = pDecoder->GetFrame(0, &pSource);
+			}
+			if (SUCCEEDED(hr))
+			{
+
+				// Convert the image format to 32bppPBGRA
+				// (DXGI_FORMAT_B8G8R8A8_UNORM + D2D1_ALPHA_MODE_PREMULTIPLIED).
+				hr = pIWICFactory->CreateFormatConverter(&pConverter);
+
+			}
+
+
+			if (SUCCEEDED(hr))
+			{
+				hr = pConverter->Initialize(
+					pSource,
+					GUID_WICPixelFormat32bppPBGRA,
+					WICBitmapDitherTypeNone,
+					NULL,
+					0.f,
+					WICBitmapPaletteTypeMedianCut
+				);
+				if (SUCCEEDED(hr))
+				{
+
+					// Create a Direct2D bitmap from the WIC bitmap.
+					hr = pRenderTarget->CreateBitmapFromWicBitmap(
+						pConverter,
+						NULL,
+						&bmp
+					);
+					pRenderTarget->DrawBitmap(bmp, D2D1::RectF(x, y, x + cx, y + cy));
+				}
+
+
+				SafeRelease(&pDecoder);
+				SafeRelease(&pSource);
+				SafeRelease(&pStream);
+				SafeRelease(&pConverter);
+				SafeRelease(&pScaler);
+				SafeRelease(&bmp);
+				return hr;
+			}
+		}
+		template <class T>
+		void D2DDrawQuickShadow(
+			T hdc,
+			float x,
+			float y,
+			float cx,
+			float cy,
+			float cornerRadius,
+			float offsetX = 0.0f,      // x偏移
+			float offsetY = 0.0f,      // y偏移
+			float blurRadius = 10.0f,  // 模糊半径
+			int blurQuality = 10,      // 模糊质量（层数）
+			float spreadRadius = 0.0f, // 扩展半径（类似box-shadow的spread参数）
+			float opacity = 0.15f,     // 整体透明度
+			DWORD shadowColor = RGB(0, 0, 0)  // 阴影颜色
+		)
+		{
+			for (int i = 0; i < blurQuality; i++) {
+				float progress = (float)i / blurQuality;  // 0到1的进度
+				float currentBlur = blurRadius * progress; // 当前层的模糊偏移
+
+				// 透明度：越外层越透明
+				float alpha = opacity * (1.0f - progress);
+
+				// 关键修正：
+				// 所有层都以同一个中心点绘制，只改变大小和圆角，不移动位置
+				// 但加上 offset 来整体偏移整个阴影
+				float drawX = x + offsetX;
+				float drawY = y + offsetY;
+
+				// 尺寸调整：模糊和扩展共同作用
+				float widthAdjust = currentBlur + spreadRadius;
+				float heightAdjust = currentBlur + spreadRadius;
+
+				D2DDrawRoundRect(
+					hdc,
+					drawX - widthAdjust,   // 左上角x
+					drawY - heightAdjust + 3,  // 左上角y（保留+3偏移）
+					cx + widthAdjust * 2,  // 宽度
+					cy + heightAdjust * 2, // 高度
+					shadowColor,
+					cornerRadius + currentBlur,  // 圆角随模糊增加
+					alpha
+				);
+			}
+		}
+
+		template <class T>
+		void D2DDrawRoundRectWithTexture(T hrt, float x, float y, float cx, float cy, unsigned long clr, float rad)
+		{
+			D2DDrawRoundRect(hrt, x, y, cx, cy, VuiFadeColor(clr, 10), rad);
+			D2DDrawRoundRect(hrt, x, y, cx, cy-1, VuiFadeColor(clr, 5), rad);
+			D2DDrawRoundRect(hrt, x, y, cx, cy-2, clr, rad);
+		}
+
+		template <class T>
+		void D2DDrawRoundRectWithTexture2(T hrt, float x, float y, float cx, float cy, unsigned long clr, float rad,float a,float bdsize)
+		{
+			D2DDrawRoundRect(hrt, x, y, cx, cy, VuiFadeColor(clr, 10), rad,a,bdsize, VuiFadeColor(clr, 15));
+			D2DDrawRoundRect(hrt, x, y, cx, cy - 1, VuiFadeColor(clr, 5), rad,a);
+			D2DDrawRoundRect(hrt, x, y, cx, cy - 2, clr, rad,a);
+		}
+
+		template<class T>
+		void _D2DDrawRoundRectWithTexture2(T* m_pDCRT, float x, float y, float cx, float cy, unsigned long ClrFill, float radius)
+		{
+			// 1. 准备颜色
+			unsigned long lightColor = AdjustBrightness(ClrFill, 1.3f); // 顶部高光
+			unsigned long shadowColor = AdjustBrightness(ClrFill, 0.7f); // 底部暗边
+
+			ID2D1SolidColorBrush* pBrush = NULL;
+
+			// -------------------------------------------------------
+			// 第一步：绘制主体（基础圆角矩形）
+			// -------------------------------------------------------
+			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(RGBToHex(ClrFill), 1.0f), &pBrush);
+			D2D1_ROUNDED_RECT rect = D2D1::RoundedRect(D2D1::RectF(x, y, x + cx, y + cy), radius, radius);
+			m_pDCRT->FillRoundedRectangle(rect, pBrush);
+			SafeRelease(&pBrush);
+
+			// -------------------------------------------------------
+			// 第二步：模拟顶部高光 (Top Inner Highlight)
+			// 稍微向内偏移，画一个细长的浅色圆角框，只显示顶部
+			// -------------------------------------------------------
+			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(RGBToHex(lightColor), 0.6f), &pBrush);
+			D2D1_ROUNDED_RECT topLight = D2D1::RoundedRect(
+				D2D1::RectF(x + 1, y + 1, x + cx - 1, y + cy * 0.5f), // 只覆盖上半部分
+				radius, radius
+			);
+			// 这里用 Draw 代替 Fill 产生线条感
+			m_pDCRT->DrawRoundedRectangle(topLight, pBrush, 1.5f);
+			SafeRelease(&pBrush);
+
+			// -------------------------------------------------------
+			// 第三步：模拟底部边缘深色 (Bottom Stroke)
+			// -------------------------------------------------------
+			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(RGBToHex(shadowColor), 0.4f), &pBrush);
+			D2D1_ROUNDED_RECT bottomShadow = D2D1::RoundedRect(
+				D2D1::RectF(x, y, x + cx, y + cy),
+				radius, radius
+			);
+			// 粗细稍大，模拟底部厚度
+			m_pDCRT->DrawRoundedRectangle(bottomShadow, pBrush, 2.0f);
+			SafeRelease(&pBrush);
+
+			// -------------------------------------------------------
+			// 第四步：整体外边框（非常淡的深色边框，增强轮廓）
+			// -------------------------------------------------------
+			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(0x000000, 0.15f), &pBrush);
+			m_pDCRT->DrawRoundedRectangle(rect, pBrush, 0.5f);
+			SafeRelease(&pBrush);
+		}
+		template<class T>
+		void D2DDrawNoiseRect(
+			T* m_pDCRT,
+			float x, float y, float cx, float cy,
+			unsigned long ClrFill,
+			unsigned int seed,
+			float density = 0.5f,
+			float layerOpacity = 1.0f // 新增：图层透明度参数 (0.0~1.0)
+		)
+		{
+		
+			UINT32 width = static_cast<UINT32>(cx);
+			UINT32 height = static_cast<UINT32>(cy);
+			if (width <= 0 || height <= 0) return;
+			std::vector<UINT32> pixels(width * height);
+
+			BYTE r_base = GetRValue(ClrFill);
+			BYTE g_base = GetGValue(ClrFill);
+			BYTE b_base = GetBValue(ClrFill);
+
+			// 3. 随机数生成器
+			std::mt19937 gen(seed);
+			std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+			// 亮度抖动范围：0.9 到 1.1 (即 10% 的幅度)
+			std::uniform_real_distribution<float> lightDist(0.8f, 1.25f);
+
+			for (UINT32 i = 0; i < width * height; ++i) {
+				if (dist(gen) < density) {
+					// 计算随机亮度因子
+					float factor = lightDist(gen);
+					BYTE r = static_cast<BYTE>(min(255.0f, r_base * factor));
+					BYTE g = static_cast<BYTE>(min(255.0f, g_base * factor));
+					BYTE b = static_cast<BYTE>(min(255.0f, b_base * factor));
+
+					// 内存布局：0xAARRGGBB (对应小端序 B8G8R8A8)
+					pixels[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+				}
+				else {
+					pixels[i] = 0x00000000;
+				}
+			}
+
+			// 4. 创建 D2D 位图
+			ID2D1Bitmap* pBitmap = NULL;
+			D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+				D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+			);
+
+			HRESULT hr = m_pDCRT->CreateBitmap(
+				D2D1::SizeU(width, height),
+				pixels.data(),
+				width * sizeof(UINT32),
+				&props,
+				&pBitmap
+			);
+
+			if (SUCCEEDED(hr)) {
+				D2D1_RECT_F destRect = D2D1::RectF(x, y, x + cx, y + cy);
+				// 在此处指定图层透明度 layerOpacity
+				m_pDCRT->DrawBitmap(pBitmap, destRect, layerOpacity);
+				pBitmap->Release(); // 建议使用原生 Release 或你的 SafeRelease
+			}
+		}
+
 		//GDI
 		//DrawRect
 		void DrawRect(HDC hdc, int x, int y, int sizex, int sizey, COLORREF cl)
@@ -989,6 +1775,47 @@ namespace VertexUI
 			return hico;
 
 		}
+		HICON GetExtIcon2(const wchar_t* pszPath)
+		{
+			SHFILEINFO sfi;
+			if (!SHGetFileInfo(pszPath, 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES)) return NULL;
+
+			// 获取大号图像列表
+			IImageList* piml;
+
+			if (FAILED(SHGetImageList(SHIL_JUMBO, IID_PPV_ARGS(&piml)))) return NULL;
+
+			// 提取图标
+			HICON hico;
+			piml->GetIcon(sfi.iIcon, ILD_TRANSPARENT, &hico);
+
+			// 清理资源
+			piml->Release();
+
+			return hico;
+
+		}
+
+		HICON GetExtIcon3(const wchar_t* pszPath)
+		{
+			SHFILEINFO sfi;
+			if (!SHGetFileInfo(pszPath, 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES)) return NULL;
+
+			// 获取大号图像列表
+			IImageList* piml;
+
+			if (FAILED(SHGetImageList(SHIL_EXTRALARGE, IID_PPV_ARGS(&piml)))) return NULL;
+
+			// 提取图标
+			HICON hico;
+			piml->GetIcon(sfi.iIcon, ILD_TRANSPARENT, &hico);
+
+			// 清理资源
+			piml->Release();
+
+			return hico;
+
+		}
 		void DisplayIcon(HDC hdc, const wchar_t* path, int x, int y, int sz)
 		{
 			//正式代码
@@ -1110,6 +1937,62 @@ namespace VertexUI
 
 			return pD2DBitmap;
 		}
+		template <typename T>
+		ID2D1Bitmap* D2DCreateExtIconBitmap(T* pRenderTarget, const wchar_t* path, int sz)
+		{
+			if (!pRenderTarget) return nullptr;
+
+			// 获取HICON
+
+			HICON hIcon;
+			if (sz > 128)
+			{
+				hIcon = GetExtIcon3(path);
+			}
+			else  hIcon = GetExtIcon2(path);
+			if (!hIcon) return nullptr;
+
+			// 创建32位DIB
+			HDC hdcScreen = GetDC(nullptr);
+			HDC hdcMem = CreateCompatibleDC(hdcScreen);
+
+			BITMAPINFO bmi = { 0 };
+			bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+			bmi.bmiHeader.biWidth = sz;
+			bmi.bmiHeader.biHeight = -sz;
+			bmi.bmiHeader.biPlanes = 1;
+			bmi.bmiHeader.biBitCount = 32;
+			bmi.bmiHeader.biCompression = BI_RGB;
+
+			BYTE* pBits = nullptr;
+			HBITMAP hBitmap = CreateDIBSection(hdcMem, &bmi, DIB_RGB_COLORS, (void**)&pBits, nullptr, 0);
+
+			HGDIOBJ hOld = SelectObject(hdcMem, hBitmap);
+			DrawIconEx(hdcMem, 0, 0, hIcon, sz, sz, 0, nullptr, DI_NORMAL);
+			SelectObject(hdcMem, hOld);
+
+			// 创建D2D位图
+			D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+				D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+			);
+
+			ID2D1Bitmap* pD2DBitmap = nullptr;
+			HRESULT hr = pRenderTarget->CreateBitmap(
+				D2D1::SizeU(sz, sz),
+				pBits,
+				sz * 4,
+				&props,
+				&pD2DBitmap
+			);
+
+			// 清理
+			DeleteObject(hBitmap);
+			DestroyIcon(hIcon);
+			DeleteDC(hdcMem);
+			ReleaseDC(nullptr, hdcScreen);
+
+			return pD2DBitmap;
+		}
 		int gByteWidth = 0;
 		int gD2DBmWid = 0;
 		int gD2DBmHei = 0;
@@ -1147,7 +2030,7 @@ namespace VertexUI
 			return pPixels;
 		}
 		template <typename T>
-		void D2DDrawBitmapFrompBm(T hrt, ID2D1Bitmap* pBm, int x, int y, int sz)
+		void D2DDrawBitmapFrompBm(T hrt, ID2D1Bitmap* pBm, float x, float y, float sz)
 		{
 			if (!hrt || !pBm) return;
 
@@ -1194,7 +2077,55 @@ namespace VertexUI
 				sourceRect
 			);
 		}
+		template <typename T>
+		void D2DDrawBitmapFrompBm2(T hrt, ID2D1Bitmap* pBm, float x, float y, float sz, float opacity = 1.0f)
+		{
+			if (!hrt || !pBm) return;
 
+			ID2D1RenderTarget* pRenderTarget = nullptr;
+
+			// 根据不同的类型获取渲染目标
+			if constexpr (std::is_same_v<T, ID2D1HwndRenderTarget*> ||
+				std::is_same_v<T, ID2D1RenderTarget*>) {
+				pRenderTarget = static_cast<ID2D1RenderTarget*>(hrt);
+			}
+			else if constexpr (std::is_same_v<T, ID2D1DeviceContext*>) {
+				pRenderTarget = static_cast<ID2D1DeviceContext*>(hrt);
+			}
+			else {
+				// 对于其他类型，假设可以直接转换为ID2D1RenderTarget
+				// 注意: 这个假设可能导致运行时错误，但在模板内保留以保持与原代码逻辑一致
+				pRenderTarget = static_cast<ID2D1RenderTarget*>(hrt);
+			}
+
+			if (!pRenderTarget) return;
+
+			// 创建目标矩形
+			D2D1_RECT_F destRect = D2D1::RectF(
+				static_cast<FLOAT>(x),
+				static_cast<FLOAT>(y),
+				static_cast<FLOAT>(x + sz),
+				static_cast<FLOAT>(y + sz)
+			);
+
+			// 创建源矩形（整个位图）
+			D2D1_SIZE_U bitmapSize = pBm->GetPixelSize();
+			D2D1_RECT_F sourceRect = D2D1::RectF(0, 0,
+				static_cast<FLOAT>(bitmapSize.width),
+				static_cast<FLOAT>(bitmapSize.height));
+
+			// 设置插值模式以获得更好的缩放效果
+			pRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+			// 绘制位图
+			pRenderTarget->DrawBitmap(
+				pBm,
+				destRect,
+				opacity, // <--- 关键修改：使用新的 opacity 参数
+				D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+				sourceRect
+			);
+		}
 		template <typename T>
 		void D2DDrawBitmapFromByte(T hdc, BYTE* pPixels, int x, int y, int sz)
 		{
@@ -1251,6 +2182,104 @@ namespace VertexUI
 			ID2D1Bitmap* BMP = D2DCreateIconBitmap(hdc, path, sz);
 			D2DDrawBitmapFrompBm(hdc, BMP, x, y, sz);
 			SafeRelease(&BMP);
+		}
+		static std::unordered_map<std::wstring, ID2D1Bitmap*> g_icon_cache;
+
+		// 从缓存中获取或创建图标并显示
+		// 修改全局缓存结构：为每个渲染目标维护独立的缓存
+		static std::unordered_map<ID2D1RenderTarget*,
+			std::unordered_map<std::wstring, ID2D1Bitmap*>> g_per_context_icon_cache;
+
+		template <typename T>
+		void D2DDisplayIconFromCache(T hdc, const wchar_t* path, float x, float y, float sz,float opacity=1.0)
+		{
+			if (!hdc) return;
+
+		
+			ID2D1RenderTarget* pRenderTarget = nullptr;
+			if constexpr (std::is_same_v<T, ID2D1HwndRenderTarget*>) {
+				pRenderTarget = static_cast<ID2D1HwndRenderTarget*>(hdc);
+			}
+			else if constexpr (std::is_same_v<T, ID2D1DeviceContext*>) {
+				pRenderTarget = static_cast<ID2D1DeviceContext*>(hdc);
+			}
+			else if constexpr (std::is_same_v<T, ID2D1RenderTarget*>) {
+				pRenderTarget = static_cast<ID2D1RenderTarget*>(hdc);
+			}
+			else {
+				return;
+			}
+
+			if (!pRenderTarget) return;
+
+			std::wstring path_key(path);
+
+			//缓存查找
+			auto context_it = g_per_context_icon_cache.find(pRenderTarget);
+			ID2D1Bitmap* BMP = nullptr;
+
+			if (context_it != g_per_context_icon_cache.end()) {
+				auto& icon_map = context_it->second;
+				auto it = icon_map.find(path_key);
+				if (it != icon_map.end()) {
+					BMP = it->second;
+				}
+			}
+
+			if (!BMP) {
+				
+				BMP = D2DCreateIconBitmap(hdc, path, sz);
+				if (BMP) {
+					
+					g_per_context_icon_cache[pRenderTarget][path_key] = BMP;
+				}
+			}
+
+			if (BMP) {
+				if (opacity >= 1.0)
+				{
+					D2DDrawBitmapFrompBm(hdc, BMP, x, y, sz);
+				}
+				else D2DDrawBitmapFrompBm2(hdc, BMP, x, y, sz,opacity);
+			}
+		}
+
+		template <typename T>
+		void D2DDisplayExtIconFromCache(T hdc, const wchar_t* path, int x, int y, int sz)
+		{
+
+			std::wstring path_key(path);
+
+
+			auto it = g_icon_cache.find(path_key);
+			ID2D1Bitmap* BMP = nullptr;
+
+			if (it != g_icon_cache.end()) {
+
+				BMP = it->second;
+
+			}
+			else {
+
+				BMP = D2DCreateExtIconBitmap(hdc, path, sz);
+
+				if (BMP) {
+					g_icon_cache[path_key] = BMP;
+				}
+			}
+
+
+			if (BMP) {
+				D2DDrawBitmapFrompBm(hdc, BMP, x, y, sz);
+			}
+
+		}
+
+		void D2DClearIconCache() {
+			for (auto& pair : g_icon_cache) {
+				SafeRelease(&pair.second); 
+			}
+			g_icon_cache.clear(); 
 		}
 		void CreatehIcon(HDC hdc, HICON hIcon, int x, int y, int sz)
 		{

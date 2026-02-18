@@ -22,7 +22,12 @@ namespace VertexUI {
 		rMouseDown,
 		rMouseUp,
 		mouseOver,
-		mouseUnfocus
+		mouseUnfocus,
+		keyDown,
+		keyUp,
+		fileDrop,
+		ime_char,
+		null,
 	};
 	class VertexUIColorGradientInfo
 	{
@@ -55,7 +60,39 @@ namespace VertexUI {
 		Pushing,
 		Flex
 	};
+	struct VinaOption {
+		std::wstring text;
+		std::wstring description; // 新增：描述文本
+		std::function<void()> onClick;
+		std::function<void(bool)> b_onClick;
+		std::function<void(POINT)> onHover;
+		std::vector<VinaOption> subOptions;
+		std::vector<VinaOption> hoverOptions;
+		int activeStat = 1;
+		bool isSwitch = false; // 新增：控制是否为 Switch 类型
 
+		VinaOption() : text(L""), description(L""), activeStat(1), isSwitch(false) {}
+
+		// 保持兼容性的构造函数（通过末尾默认参数增加 isSwitch）
+		VinaOption(std::wstring t, std::function<void()> c, int a = 1, bool s = false)
+			: text(t), description(L""), onClick(c), activeStat(a), isSwitch(s) {
+		}
+
+		VinaOption(std::vector<VinaOption> subs)
+			: subOptions(subs), isSwitch(false) {
+		}
+
+		VinaOption(std::wstring t, std::vector<VinaOption> hovers, int a = 1, bool s = false)
+			: text(t), description(L""), hoverOptions(hovers), activeStat(a), isSwitch(s) {
+		}
+
+		VinaOption(std::wstring t, std::wstring desc, std::function<void()> c, int a = 1, bool s = false)
+			: text(t), description(desc), onClick(c), activeStat(a), isSwitch(s) {
+		}
+		VinaOption(std::wstring t, std::wstring desc, std::function<void(bool)> c, int a = 1, bool s = false)
+			: text(t), description(desc), b_onClick(c), activeStat(a), isSwitch(s) {
+		}
+	};
 	class VertexUIPos
 	{
 	public:
@@ -72,6 +109,14 @@ namespace VertexUI {
 	{
 		wchar_t a[128];
 		_itow(i, a, 10);
+		OutputDebugString(a);
+		OutputDebugString(L"\n");
+		return;
+	}
+	void MonitorValue2(float f)
+	{
+		wchar_t a[128];
+		swprintf_s(a, L"%f", f);  // 使用swprintf_s将float转换为宽字符字符串
 		OutputDebugString(a);
 		OutputDebugString(L"\n");
 		return;
@@ -117,6 +162,18 @@ namespace VertexUI {
 
 			return -1;
 		}
+		virtual int AddEvent(const vinaPoint& pt, vinaEvent _, std::wstring ExInfo) {
+
+			return -1;
+		}
+		virtual int AddEvent(const vinaPoint& pt, vinaEvent _, std::vector<std::wstring> ExInfo) {
+
+			return -1;
+		}
+		virtual int AddEvent(const vinaPoint& pt, vinaEvent _, unsigned long ExInfo) {
+
+			return -1;
+		}
 		virtual int OnClick()
 		{
 			return 0;
@@ -141,7 +198,7 @@ namespace VertexUI {
 			this->x = x;
 			this->y = y;
 			this->cx = cx;
-			this->cx = cy;
+			this->cy = cy;
 
 			return 0;
 		}
@@ -181,6 +238,15 @@ namespace VertexUI {
 		{
 			this->IsPushed = false;
 		}
+		bool GetFocusFlag()
+		{
+			return this->IsFocused;
+		}
+		virtual void SetFocusFlag(bool b)
+		{
+			this->IsFocused=b;
+		}
+		int x, y, cx, cy;
 	private:
 
 		HWND hWnd;
@@ -190,7 +256,8 @@ namespace VertexUI {
 		const wchar_t* Text;
 		VertexUIColorInfo pInfo;
 	protected:
-		int x, y, cx, cy;
+
+		bool IsFocused = false;
 		bool IsHoverd = false;
 		bool IsPushed = false;
 		bool IsInfoChanged = false;
@@ -427,6 +494,18 @@ namespace VertexUI {
 	class D2DVertexUIPanel : public VertexUIPanel
 	{
 	public:
+		/*
+		int Set(VinaWindow* win, ID2D1HwndRenderTarget* hdc)
+		{
+			ClearVector(Ctl);
+			ClearVector(Group);
+			ClearVector(CtlPtr);
+			this->hWnd = win->GetHandle();
+			this->win = win;
+			this->pDC = hdc;
+			return 0;
+		}
+		*/
 		int Set(HWND hWnd, ID2D1HwndRenderTarget* hdc)
 		{
 			ClearVector(Ctl);
@@ -446,7 +525,100 @@ namespace VertexUI {
 			this->Layout = lo;
 			return 0;
 		}
+		int Set(HWND hWnd, ID2D1HwndRenderTarget* hdc, int xo, int yo)
+		{
+			ClearVector(Ctl);
+			ClearVector(Group);
+			ClearVector(CtlPtr);
+			this->hWnd = hWnd;
+			this->pDC = hdc;
+			this->xOffSet = xo;
+			this->yOffSet = yo;
+			return 0;
+		}
+		vinaPoint GetOffset()
+		{
+			vinaPoint pt;
+			pt.x = xOffSet;
+			pt.y = yOffSet;
+			return pt;
+		}
 		virtual int AddEvent(const vinaPoint& pt, vinaEvent event_)
+		{
+			int ret = -1;
+
+			if (CtlPtr.size() >= 1)
+			{
+				int iterPos = 0;
+				for (int i = 0; i < CtlPtr.size(); i++)
+				{
+					CtlPtr[i]->ResetHoverFlag();
+					if (event_ == vinaEvent::mouseUp || event_ == vinaEvent::mouseUnfocus ) {
+						VertexUIPos vp = CtlPtr[i]->GetCurrentRect();
+						if (GetPtInfo2(pt, vp.x, vp.y, vp.cx, vp.cy)==0 && event_ == vinaEvent::mouseUp)
+						{
+							CtlPtr[i]->SetFocusFlag(false);
+						}
+						CtlPtr[i]->ResetClickFlag();
+					}
+				}
+				for (int i = CtlPtr.size() - 1; i >= 0; i--)
+				{
+
+
+					VertexUIPos vp = CtlPtr[i]->GetCurrentRect();
+					if (GetPtInfo2(pt, vp.x, vp.y, vp.cx, vp.cy))
+					{
+						int preret = CtlPtr[i]->AddEvent(pt, event_);
+						if (preret != -1)
+						{
+							ret = preret;
+							break;
+						}
+					}
+					iterPos++;
+
+				}
+			}
+
+			return ret;
+		}
+		virtual int AddEvent(const vinaPoint& pt, vinaEvent event_, std::wstring ExInfo)
+		{
+			int ret = -1;
+
+			if (CtlPtr.size() >= 1)
+			{
+				for (int i = 0; i < CtlPtr.size(); i++)
+				{
+					CtlPtr[i]->ResetHoverFlag();
+					if (event_ == vinaEvent::mouseUp || event_ == vinaEvent::mouseUnfocus)CtlPtr[i]->ResetClickFlag();
+				}
+				int iterPos = 0;
+			
+
+				for (int i = CtlPtr.size() - 1; i >= 0; i--)
+				{
+
+
+					VertexUIPos vp = CtlPtr[i]->GetCurrentRect();
+					if (GetPtInfo2(pt, (vp.x + xOffSet), (vp.y + yOffSet), vp.cx, vp.cy))
+					{
+						int preret = CtlPtr[i]->AddEvent(pt, event_, ExInfo);
+						if (preret != -1)
+						{
+							ret = preret;
+							break;
+						}
+					}
+					iterPos++;
+
+				}
+			}
+
+			return ret;
+		}
+		virtual int AddEvent(const vinaPoint& pt, vinaEvent event_, std::vector<std::wstring> ExInfo)
 		{
 			int ret = -1;
 
@@ -463,9 +635,50 @@ namespace VertexUI {
 
 
 					VertexUIPos vp = CtlPtr[i]->GetCurrentRect();
-					if (GetPtInfo2(pt, vp.x, vp.y, vp.cx, vp.cy))
+					if (GetPtInfo2(pt, (vp.x + xOffSet), (vp.y + yOffSet), vp.cx, vp.cy))
 					{
-						int preret = CtlPtr[i]->AddEvent(pt, event_);
+						int preret = CtlPtr[i]->AddEvent(pt, event_, ExInfo);
+						if (preret != -1)
+						{
+							ret = preret;
+							break;
+						}
+					}
+					iterPos++;
+
+				}
+			}
+
+			return ret;
+		}
+		virtual int AddEvent(const vinaPoint& pt, vinaEvent event_, unsigned long ExInfo)
+		{
+			int ret = -1;
+
+			if (CtlPtr.size() >= 1)
+			{
+				int iterPos = 0;
+				for (int i = 0; i < CtlPtr.size(); i++)
+				{
+					CtlPtr[i]->ResetHoverFlag();
+					if (event_ == vinaEvent::mouseUp || event_ == vinaEvent::mouseUnfocus)CtlPtr[i]->ResetClickFlag();
+				}
+				if (event_ == vinaEvent::keyDown || event_ == vinaEvent::ime_char) {
+					for (auto& ctl : CtlPtr) {
+						if (ctl->GetFocusFlag()) {
+							return ctl->AddEvent(pt, event_, ExInfo);
+						}
+					}
+				}
+				for (int i = CtlPtr.size() - 1; i >= 0; i--)
+				{
+
+
+					VertexUIPos vp = CtlPtr[i]->GetCurrentRect();
+					if (GetPtInfo2(pt, vp.x / gScale, vp.y / gScale, vp.cx / gScale, vp.cy / gScale))
+					{
+
+						int preret = CtlPtr[i]->AddEvent(pt, event_, ExInfo);
 						if (preret != -1)
 						{
 							ret = preret;
@@ -498,6 +711,12 @@ namespace VertexUI {
 
 			return ret;
 		}
+		/*
+		VinaWindow* GetWindow()
+		{
+			return this->win;
+		}
+		*/
 		template <class T>
 		void Add(T ctl)
 		{
@@ -506,8 +725,52 @@ namespace VertexUI {
 			ctl->SetParent(this);
 			this->CtlPtr.push_back(ctl);
 		}
+	private:
+			int xOffSet = 0;
+			int yOffSet = 0;
 	protected:
 		ID2D1HwndRenderTarget* pDC;
+		//VinaWindow* win;
 		bool hoverHandled = false;
 	};
+		template<typename T>
+		class VinaLayout {
+		private:
+			int _startX, _startY, _itemWidth, _itemHeight, _gap, _boundWidth;
+			int _curX, _curY;
+
+		public:
+			// 初始化排版参数
+			void Begin(int startX, int startY, int itemW, int itemH, int gap, int boundWidth) {
+				_startX = startX;
+				_startY = startY;
+				_itemWidth = itemW;
+				_itemHeight = itemH;
+				_gap = gap;
+				_boundWidth = boundWidth;
+
+				_curX = startX;
+				_curY = startY;
+			}
+
+			// 核心方法：传入组件，自动计算并设置它的位置，然后移动指针
+			void AddElement(std::shared_ptr<T> element) {
+				if (!element) return;
+
+				// 检查是否需要换行：如果当前 X + 组件宽度超过了边界，且当前行不是空的
+				if (_curX + _itemWidth > _boundWidth && _curX > _startX) {
+					_curX = _startX;
+					_curY += _itemHeight + _gap;
+				}
+
+				// 直接设置组件位置
+				element->SetInfo(_curX, _curY, _itemWidth, _itemHeight);
+
+				// 指针向后移动
+				_curX += _itemWidth + _gap;
+			}
+
+			// 获取当前排版到的高度（方便后续接其他内容）
+			int GetCurrentY() { return _curY + _itemHeight; }
+		};
 }
