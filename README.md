@@ -127,3 +127,8 @@ MainWindow->AnimateVariableWithBezier(
     0.25, 0.1, 0.25, 1.0 // Bezier
 );
 ```
+
+特别鸣谢：
+@Haceau-Zoac (vui.parser)
+@KitraMGP （规范性提议）
+THANKS TO Vilinko All.
