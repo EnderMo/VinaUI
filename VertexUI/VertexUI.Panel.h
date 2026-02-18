@@ -1341,54 +1341,61 @@ namespace VertexUI
 			D2DDrawRoundRect(hrt, x, y, cx, cy - 2, clr, rad,a);
 		}
 
-		template<class T>
-		void _D2DDrawRoundRectWithTexture2(T* m_pDCRT, float x, float y, float cx, float cy, unsigned long ClrFill, float radius)
-		{
-			// 1. 准备颜色
-			unsigned long lightColor = AdjustBrightness(ClrFill, 1.3f); // 顶部高光
-			unsigned long shadowColor = AdjustBrightness(ClrFill, 0.7f); // 底部暗边
+		ID2D1Bitmap* LoadIconToD2DBitmap(ID2D1HwndRenderTarget* hrt, UINT iconID, int destWidth = 0, int destHeight = 0) {
+			HRESULT hr = S_OK;
 
-			ID2D1SolidColorBrush* pBrush = NULL;
-
-			// -------------------------------------------------------
-			// 第一步：绘制主体（基础圆角矩形）
-			// -------------------------------------------------------
-			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(RGBToHex(ClrFill), 1.0f), &pBrush);
-			D2D1_ROUNDED_RECT rect = D2D1::RoundedRect(D2D1::RectF(x, y, x + cx, y + cy), radius, radius);
-			m_pDCRT->FillRoundedRectangle(rect, pBrush);
-			SafeRelease(&pBrush);
-
-			// -------------------------------------------------------
-			// 第二步：模拟顶部高光 (Top Inner Highlight)
-			// 稍微向内偏移，画一个细长的浅色圆角框，只显示顶部
-			// -------------------------------------------------------
-			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(RGBToHex(lightColor), 0.6f), &pBrush);
-			D2D1_ROUNDED_RECT topLight = D2D1::RoundedRect(
-				D2D1::RectF(x + 1, y + 1, x + cx - 1, y + cy * 0.5f), // 只覆盖上半部分
-				radius, radius
+			HICON hIcon = (HICON)LoadImage(
+				GetModuleHandle(NULL),
+				MAKEINTRESOURCE(iconID),
+				IMAGE_ICON,
+				256,  
+				256, 
+				LR_SHARED
 			);
-			// 这里用 Draw 代替 Fill 产生线条感
-			m_pDCRT->DrawRoundedRectangle(topLight, pBrush, 1.5f);
-			SafeRelease(&pBrush);
 
-			// -------------------------------------------------------
-			// 第三步：模拟底部边缘深色 (Bottom Stroke)
-			// -------------------------------------------------------
-			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(RGBToHex(shadowColor), 0.4f), &pBrush);
-			D2D1_ROUNDED_RECT bottomShadow = D2D1::RoundedRect(
-				D2D1::RectF(x, y, x + cx, y + cy),
-				radius, radius
-			);
-			// 粗细稍大，模拟底部厚度
-			m_pDCRT->DrawRoundedRectangle(bottomShadow, pBrush, 2.0f);
-			SafeRelease(&pBrush);
+			if (!hIcon) return nullptr;
 
-			// -------------------------------------------------------
-			// 第四步：整体外边框（非常淡的深色边框，增强轮廓）
-			// -------------------------------------------------------
-			m_pDCRT->CreateSolidColorBrush(D2D1::ColorF(0x000000, 0.15f), &pBrush);
-			m_pDCRT->DrawRoundedRectangle(rect, pBrush, 0.5f);
-			SafeRelease(&pBrush);
+			if (!m_ImageFactory) {
+				hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_ImageFactory));
+				if (FAILED(hr)) return nullptr;
+			}
+
+			IWICBitmap* pWICBitmap = nullptr;
+			IWICFormatConverter* pConverter = nullptr;
+			ID2D1Bitmap* pD2DBitmap = nullptr;
+
+			hr = m_ImageFactory->CreateBitmapFromHICON(hIcon, &pWICBitmap);
+
+			if (SUCCEEDED(hr)) {
+				hr = m_ImageFactory->CreateFormatConverter(&pConverter);
+			}
+
+			if (SUCCEEDED(hr)) {
+		
+				hr = pConverter->Initialize(
+					pWICBitmap,
+					GUID_WICPixelFormat32bppPBGRA,
+					WICBitmapDitherTypeNone,
+					NULL,
+					0.f,
+					WICBitmapPaletteTypeMedianCut
+				);
+			}
+
+			if (SUCCEEDED(hr)) {
+				// 3. 创建位图属性，确保 DPI 一致
+				// 有时默认 DPI 较低也会导致模糊，我们可以手动设置为渲染目标的 DPI
+				FLOAT dpiX, dpiY;
+				hrt->GetDpi(&dpiX, &dpiY);
+				D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dpiX, dpiY);
+
+				hr = hrt->CreateBitmapFromWicBitmap(pConverter, &props, &pD2DBitmap);
+			}
+
+			if (pConverter) pConverter->Release();
+			if (pWICBitmap) pWICBitmap->Release();
+
+			return pD2DBitmap;
 		}
 		template<class T>
 		void D2DDrawNoiseRect(

@@ -136,7 +136,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="framework.h" />
-    <ClInclude Include="MainUI.hpp" />
+    <ClInclude Include="LegacyUtils.hpp" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="VertexUI\framework.h" />
     <ClInclude Include="VertexUI\VertexUI.Animation.hpp" />
@@ -163,7 +163,6 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="small.ico" />
-    <Image Include="VinaApp.ico" />
   </ItemGroup>
   <ItemGroup>
     <None Include="VertexUI\VertexUI" />

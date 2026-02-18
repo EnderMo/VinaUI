@@ -1421,6 +1421,9 @@ public:
 		this->hWnd = hWnd;
 		CreateCtl(hWnd, hdc);
 	}
+	std::wstring GetText() {
+		return this->text2;
+	}
 	std::wstring txt;
 	std::wstring c;
 	std::wstring _event;
