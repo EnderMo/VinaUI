@@ -57,7 +57,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	}
 
 	namespace fs = std::filesystem;
-	fs::path fontPath = fs::path(LocalData) / L"Font-AwesomeFree.ttf";
+	fs::path fontPath =  L"Font-AwesomeFree.ttf";
 
 	FreeAnyResource(IDF_FONTAWESOME, L"BINARY", fontPath.c_str());
 	AddFontResource(fontPath.c_str());

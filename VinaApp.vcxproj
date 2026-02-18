@@ -135,7 +135,6 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h" />
     <ClInclude Include="LegacyUtils.hpp" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="VertexUI\framework.h" />
@@ -163,9 +162,6 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="small.ico" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="VertexUI\VertexUI" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
