@@ -1519,7 +1519,7 @@ public:
 				{
 
 					CompGdiD2D(hWnd, hdc, [x, overlayY, cx, overlayHeight](HWND hWnd, HDC hdc) {
-						AreaBlur(hdc, { (int)(x * gScale), (int)(overlayY * gScale), int(cx * gScale), int((overlayHeight + 20) * gScale) }, 2, 3, 0);
+						//AreaBlur(hdc, { (int)(x * gScale), (int)(overlayY * gScale), int(cx * gScale), int((overlayHeight + 20) * gScale) }, 2, 3, 0);
 						});
 					D2DDrawRoundRect(pRT, x - 1, overlayY, cx + 2, overlayHeight + 20, VuiFadeColor2(VERTEXUICOLOR_WHITE, 40), 0, 0.6f, 0.8f, VERTEXUICOLOR_WHITE);
 				}

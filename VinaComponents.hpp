@@ -2,7 +2,7 @@
 #include "tsl/ordered_map.h"
 #include "VinaCommonCtls.hpp"
 #include "VertexUI/vui.parser/vui.parser.hpp"
-#include "Vui.Foundation/Encoding.h"
+//#include "Vui.Foundation/Encoding.h"
 const wchar_t* testChar = LR"(
 Text{id("114514"),x(230),y(220),cx(100),cy(40),text("TextQAQ")}
 FontIcon{id("114519"),x(230),y(410),size(40),text("test-right")}
