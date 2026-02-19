@@ -1,8 +1,18 @@
 ﻿#include "VinaApp.h"
 
+struct WaterfallCard {
+	float y;
+	std::wstring text;
+	unsigned long color;
+	float animY = 20.0f;
+	float alpha = 0.0f;
+	bool animated = false;
+};
+
 class MainAppContext {
 public:
 	int currentTabIndex = 0;
+	float scrollVal=0;
 	std::vector<std::shared_ptr<VinaSideTab>> tabs;
 	std::shared_ptr<VinaButton> btn = std::make_shared<VinaButton>();
 	std::shared_ptr<VinaSlider> sli = std::make_shared<VinaSlider>();
@@ -16,19 +26,56 @@ public:
 	std::list<CharAnim> animatingChars;
 	ID2D1Bitmap* pAppLogo = nullptr;
 
+	std::vector<WaterfallCard> waterfallData;
+
+	float maxScrollLimit = 0.0f; 
+	bool isGenerating = false; 
+	int activeAnimationCount = 0;
+
 	void InitTabs() {
 		if (!tabs.empty()) return;
 		auto tab1 = std::make_shared<VinaSideTab>();
-		tab1->Set(0, 55, 120, L"DemoUI", L"test-home", 20, VERTEXUICOLOR_WHITE);
+		tab1->Set(0, 55, 120, L"DemoUI", L"test-home", 20, VuiFadeColor(VERTEXUICOLOR_WHITE,40));
 		tab1->Activate(true);
 
 		auto tab2 = std::make_shared<VinaSideTab>();
-		tab2->Set(0, 55, 120, L"About", L"test-info", 20, VERTEXUICOLOR_WHITE);
+		tab2->Set(0, 55, 120, L"Waterfall", L"test-test1", 20, VuiFadeColor(VERTEXUICOLOR_WHITE, 20));
+
+		auto tab3 = std::make_shared<VinaSideTab>();
+		tab3->Set(0, 55, 120, L"About", L"test-info", 20, VuiFadeColor(VERTEXUICOLOR_WHITE, 20));
+
 
 		tabs.push_back(tab1);
 		tabs.push_back(tab2);
+		tabs.push_back(tab3);
+	}
+
+	void InitWaterfall() {
+		if (!waterfallData.empty()) return;
+		GenerateCards(6);
+	}
+
+	void GenerateCards(int count) {
+		unsigned long macaronColors[] = { VERTEXUICOLOR_SEA, VERTEXUICOLOR_BLOOMLAVENDER, VERTEXUICOLOR_DAWN, VERTEXUICOLOR_FOREST, VERTEXUICOLOR_SEA };
+		for (int i = 0; i < count; i++) {
+			WaterfallCard card;
+			card.text = L"VinaUI Card " + std::to_wstring(waterfallData.size());
+			card.color = macaronColors[rand() % 5];
+			waterfallData.push_back(card);
+		}
+	}
+
+	void ResetWaterfallAnimationState() {
+		activeAnimationCount = 0;
+		for (auto& card : waterfallData) {
+			if (card.animated && (card.alpha < 1.0f || card.animY > 0.0f)) {
+				card.alpha = 1.0f;
+				card.animY = 0.0f;
+			}
+		}
 	}
 };
+
 
 VinaWindow* MainWindow = new VinaWindow;
 
@@ -78,21 +125,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 		控件需要使用静态标识，或者在 CreatePanel 外部初始化。
 
-		使用用 std::vector 等容器储存控件也是较好的方法。
+		使用 std::vector 等容器储存控件也是较好的方法。
 		*/
 
-		ctx->InitTabs();
-
-		float totalWidth = ctx->tabs.size() * 130.0f;
-		float startX = (rc.right / gScale - totalWidth) / 2.0f;
-
-		for (size_t i = 0; i < ctx->tabs.size(); i++) {
-			ctx->tabs[i]->Set(startX + i * 130, 55, 120, ctx->tabs[i]->GetText().c_str(), ctx->tabs[i]->txt.c_str(), 20, VERTEXUICOLOR_WHITE, [ctx, i] {
-				ctx->currentTabIndex = (int)i;
-				});
-			ctx->tabs[i]->Activate(ctx->currentTabIndex == i);
-			MainWindow->GetPanel()->Add(ctx->tabs[i]);
-		}
 
 		if (ctx->currentTabIndex == 0) {
 
@@ -146,8 +181,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 						ctx->animatingChars.push_back({ currentText[i], 0.0f, lockedX, 18.0f, false });
 						CharAnim& ref = ctx->animatingChars.back();
 
-						MainWindow->AnimateVariableWithBezier(hWnd, ref.alpha, 0.0f, 1.0f, 0.4);
-						MainWindow->AnimateVariableWithBezier(hWnd, ref.yOffset, 18.0f, 0.0f, 0.4);
+						ref.alphaAnimId = MainWindow->AnimateVariableWithBezier(hWnd, ref.alpha, 0.0f, 1.0f, 0.4);
+						ref.yOffsetAnimId = MainWindow->AnimateVariableWithBezier(hWnd, ref.yOffset, 18.0f, 0.0f, 0.4);
 					}
 				}
 				else if (currentText.length() < ctx->lastText.length()) {
@@ -162,11 +197,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 							it->isRemoving = true;
 							CharAnim& ref = *it;
 
-							MainWindow->AnimateVariableWithBezier(hWnd, ref.alpha, ref.alpha, 0.0f, 0.3);
-							MainWindow->AnimateVariableWithBezier(hWnd, ref.yOffset, ref.yOffset, 10.0f, 0.3,
-								0.25, 0.1, 0.25, 1.0,
-								[]() {}
-							);
+							ref.alphaAnimId = MainWindow->AnimateVariableWithBezier(hWnd, ref.alpha, ref.alpha, 0.0f, 0.3);
+							ref.yOffsetAnimId = MainWindow->AnimateVariableWithBezier(hWnd, ref.yOffset, ref.yOffset, 10.0f, 0.3);
 						}
 					}
 				}
@@ -174,8 +206,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			}
 
 			//清理
-			ctx->animatingChars.remove_if([](const CharAnim& c) {
-				return c.isRemoving && c.alpha <= 0.01f;
+			ctx->animatingChars.remove_if([&](const CharAnim& c) {
+				if (c.isRemoving && c.alpha <= 0.01f) {
+		
+					if (c.alphaAnimId != -1) {
+						MainWindow->StopAnimation(c.alphaAnimId);
+					}
+					if (c.yOffsetAnimId != -1) {
+						MainWindow->StopAnimation(c.yOffsetAnimId);
+					}
+					return true; 
+				}
+				return false;
 				});
 
 			float startX_txt = 260.0f;
@@ -190,12 +232,92 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		}
 		if (ctx->currentTabIndex == 1)
 		{
+			float delta = MainWindow->GetPanel()->GetInstantScrollDepth();
+			ctx->scrollVal -= delta;
+			if (ctx->scrollVal > 0.0f) ctx->scrollVal = 0.0f;
+
+			float viewWidth = rc.right / gScale;
+			float viewHeight = rc.bottom / gScale;
+			float cardW = (viewWidth - 60.0f) / 2.0f;
+			float cardH = 150.0f;
+			float spacing = 20.0f;
+			float startY = 120.0f;
+
+			int rowCount = (int)ceil(ctx->waterfallData.size() / 2.0f);
+			float totalContentHeight = startY + rowCount * (cardH + spacing);
+
+			float minScroll = viewHeight - totalContentHeight - 50.0f;
+			if (minScroll > 0) minScroll = 0;
+			if (ctx->scrollVal < minScroll) ctx->scrollVal = minScroll;
+
+			// 触发加载
+			if (totalContentHeight + ctx->scrollVal < viewHeight + 100.0f && ctx->waterfallData.size() < 200) {
+				ctx->GenerateCards(6);
+			}
+
+			
+			for (size_t i = 0; i < ctx->waterfallData.size(); i++) {
+				auto& card = ctx->waterfallData[i];
+				int row = (int)(i / 2);
+				int col = (int)(i % 2);
+
+				float drawX = 20.0f + col * (cardW + spacing);
+				float drawY = startY + row * (cardH + spacing) + ctx->scrollVal;
+
+				// 剪裁
+				if (drawY + cardH < 0) continue;
+				if (drawY > viewHeight) break;
+
+				
+				if (!card.animated) {
+					// 渲染排队
+					if (ctx->activeAnimationCount < 2) {
+						card.animated = true;
+						ctx->activeAnimationCount++;
+
+						MainWindow->AnimateVariableWithBezier(hWnd, card.alpha, 0.0f, 1.0f, 0.5);
+						MainWindow->AnimateVariableWithBezier(hWnd, card.animY, 30.0f, 0.0f, 0.6,
+							0.25, 0.1, 0.25, 1.0,
+							[ctx, &card] {
+								card.animY = 0.0f;
+								card.alpha = 1.0f;
+								if (ctx->activeAnimationCount > 0) ctx->activeAnimationCount--;
+							}
+						);
+					}
+				}
+				else {
+			    // 同步动画位置
+					if (card.alpha > 0.0f && card.alpha < 1.0f) {
+						card.alpha += 0.08f;
+						card.animY -= 2.4f; 
+						if (card.alpha >= 1.0f) {
+							card.alpha = 1.0f;
+							card.animY = 0.0f;
+							
+							if (ctx->activeAnimationCount > 0) ctx->activeAnimationCount--;
+						}
+					}
+				}
+
+				if (card.animated) {
+					float finalY = drawY + (card.animY < 0 ? 0 : card.animY);
+
+					D2DDrawQuickShadow(hrt, drawX, finalY, cardW, cardH, 10, 0, 2, 10, 5, 0, 0.05f * card.alpha, VERTEXUICOLOR_WHITE);
+					D2DDrawRoundRect(hrt, drawX, finalY, cardW, cardH, card.color, 12, card.alpha);
+					if(card.text.c_str())D2DDrawText3(hrt, card.text.c_str(), drawX + 15, finalY+cardH - 45, cardW - 30, cardH - 30, 20,
+						VERTEXUICOLOR_WHITEDRAW, L"Segoe UI", card.alpha * 0.9f);
+				}
+			}
+		}
+		if (ctx->currentTabIndex == 2)
+		{
 			float pageX = 60.0f;
 			float pageY = 120.0f;
 			float cardW = rc.right / gScale - 120.0f;
 			float cardH = 300.0f;
 
-			// 静态缓存位图，防止内存泄漏和性能损耗
+			// 静态缓存位图，提升性能
 			if (!ctx->pAppLogo) {
 				ctx->pAppLogo = LoadIconToD2DBitmap(hrt, IDI_SMALL);
 			}
@@ -239,6 +361,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			MainWindow->GetPanel()->Add(spBtn);
 		}
 
+		for (float i = 2; i < 90; i++)
+		{
+			D2DDrawSolidRect(hrt, 0, 1 * (i - 2), rc.right / gScale, 1.5F, VERTEXUICOLOR_DARKNIGHT, 1.0f - (i - 1.0f) / 80.0f);
+		}
+		D2DCreateQuickHeavyBlur(hrt, 0, 0, rc.right, 90 * gScale, 12);
+
 		ctx->capt->Set(0, 0, rc.right / gScale - 160, 40, L"VinaUI App", VERTEXUICOLOR_DARKNIGHT, 18);
 		MainWindow->GetPanel()->Add(ctx->capt);
 
@@ -264,6 +392,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		static std::shared_ptr<VinaFAIcon>min = std::make_shared<VinaFAIcon>();
 		min->Set(rc.right / gScale - 32 - 32 - 32, 20, L"win-min", 15, VERTEXUICOLOR_WHITE, [hWnd] {MainWindow->KillAnimation(); SendMessage(hWnd, WM_SYSCOMMAND, SC_MINIMIZE, 0); });
 		MainWindow->GetPanel()->Add(min);
+
+
+
+		ctx->InitTabs();
+
+		float totalWidth = ctx->tabs.size() * 130.0f;
+		float startX = (rc.right / gScale - totalWidth) / 2.0f;
+
+		for (size_t i = 0; i < ctx->tabs.size(); i++) {
+			ctx->tabs[i]->Set(startX + i * 130, 55, 120, ctx->tabs[i]->GetText().c_str(), ctx->tabs[i]->txt.c_str(), 20, VuiFadeColor(VERTEXUICOLOR_WHITE, 20), [ctx, i] {
+				ctx->currentTabIndex = (int)i;
+				ctx->ResetWaterfallAnimationState();
+				});
+			ctx->tabs[i]->Activate(ctx->currentTabIndex == i);
+			MainWindow->GetPanel()->Add(ctx->tabs[i]);
+		}
 
 		//LoadBitmapFromFile(hrt, m_ImageFactory, L"D:\\FLUENTEMOJI\\four_leaf_clover_3d.png", 20, 20, 100, 100);
 

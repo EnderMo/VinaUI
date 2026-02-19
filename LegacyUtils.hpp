@@ -227,7 +227,10 @@ struct CharAnim {
     float alpha;
     float xOffset;
     float yOffset;
-    bool isRemoving = false;
+    bool isRemoving;
+
+    int alphaAnimId = -1;
+    int yOffsetAnimId = -1;
 };
 
 float VuiMeasureStringWidth(const std::wstring& str, int fontSize) {

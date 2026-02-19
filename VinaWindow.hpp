@@ -128,44 +128,49 @@ public:
 	void UpdateAnimations() {
 		double currentTime = GetTickCount64() / 1000.0;
 
+		// 1. 第一阶段：仅计算数值，并收集需要执行的回调
+		struct PendingCallback {
+			std::function<void()> func;
+			HWND hwnd;
+		};
+		std::vector<PendingCallback> callbacks;
+
 		for (auto& task : tasks) {
 			if (!task.isActive) continue;
 
 			double elapsed = currentTime - task.startTime;
 			double progress = std::min(elapsed / task.duration, 1.0);
 
+			if (task.progressFunc && task.updateFunc) {
+				double currentProgress = task.progressFunc(progress);
+				task.updateFunc(currentProgress);
+			}
 			if (elapsed >= task.duration) {
+				task.isActive = false; 
+				if (task.completeFunc || task.targetHwnd) {
 	
-				if (task.progressFunc) {
-					double finalProgress = task.progressFunc(1.0);
-					task.updateFunc(finalProgress);
-				}
-				task.isActive = false;
-
-		
-				if (task.completeFunc) {
-					task.completeFunc();
-				}
-
-				
-				if (task.targetHwnd) {
-					Refresh(task.targetHwnd);
+					callbacks.push_back({ task.completeFunc, task.targetHwnd });
 				}
 			}
 			else {
-				
-				if (task.progressFunc) {
-					double currentProgress = task.progressFunc(progress);
-					task.updateFunc(currentProgress);
-				}
+
 				if (task.targetHwnd) {
-					Refresh(task.targetHwnd);
+					callbacks.push_back({ nullptr, task.targetHwnd });
 				}
 			}
 		}
 
-	
 		Cleanup();
+
+
+		for (const auto& cb : callbacks) {
+			if (cb.func) {
+				cb.func(); // 执行 onComplete
+			}
+			if (cb.hwnd && IsWindow(cb.hwnd)) {
+				Refresh(cb.hwnd); 
+			}
+		}
 	}
 
 

@@ -512,6 +512,86 @@ namespace VertexUI
 				D2DRenderCurrentScaledMipmap(h, x, y, cx, cy, n, o);
 			}
 		}
+		HRESULT D2DCreateGradientBlur(ID2D1HwndRenderTarget* hrt, float x, float y, float cx, float cy, int sliceCount = 40)
+		{
+			if (!hrt) return E_INVALIDARG;
+
+			HRESULT hr = S_OK;
+			ID2D1Bitmap* pFullCapture = NULL;
+			ID2D1BitmapRenderTarget* pMemRT = NULL;
+
+			// 1. 物理坐标换算
+			D2D1_RECT_U srcRectPhys = D2D1::RectU(
+				(UINT32)(x * gScale), (UINT32)(y * gScale),
+				(UINT32)((x + cx) * gScale), (UINT32)((y + cy) * gScale)
+			);
+
+			D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(hrt->GetPixelFormat());
+			props.dpiX = 96.0f * gScale;
+			props.dpiY = 96.0f * gScale;
+
+			hr = hrt->CreateBitmap(D2D1::SizeU(srcRectPhys.right - srcRectPhys.left, srcRectPhys.bottom - srcRectPhys.top), props, &pFullCapture);
+
+			if (SUCCEEDED(hr)) {
+				hr = pFullCapture->CopyFromRenderTarget(NULL, hrt, &srcRectPhys);
+			}
+
+			if (SUCCEEDED(hr)) {
+				// 创建 MemRT，稍微大一点点防止采样溢出
+				hr = hrt->CreateCompatibleRenderTarget(D2D1::SizeF(cx, cy), &pMemRT);
+			}
+
+			if (SUCCEEDED(hr) && pMemRT && pFullCapture)
+			{
+				float sliceHeight = cy / sliceCount;
+
+				for (int i = 0; i < sliceCount; i++)
+				{
+					float curY = i * sliceHeight;
+					float t = (float)i / (sliceCount - 1);
+
+					// --- 改进 1: 模糊曲线调整 ---
+					// 使用平方根或指数函数让顶部模糊更剧烈，底部更平滑过渡
+					// 最小值 0.01 (1%) 提供极强模糊
+					float blurScale = 0.01f + (powf(t, 1.5f) * 0.99f);
+
+					pMemRT->BeginDraw();
+					pMemRT->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+					// --- 改进 2: 采样重叠，消除断层 ---
+					// 采样源稍微往外扩 0.5 像素
+					D2D1_RECT_F sourceSlice = D2D1::RectF(0, curY, cx, curY + sliceHeight + 0.5f);
+
+					float sw = cx * blurScale;
+					float sh = sliceHeight * blurScale;
+					// 避免 sh 变成 0
+					if (sh < 1.0f) sh = 1.0f;
+
+					D2D1_RECT_F smallDest = D2D1::RectF(0, 0, sw, sh);
+
+					pMemRT->DrawBitmap(pFullCapture, smallDest, 1.0f,
+						D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &sourceSlice);
+					pMemRT->EndDraw();
+
+					ID2D1Bitmap* pSmallBit = NULL;
+					pMemRT->GetBitmap(&pSmallBit);
+					if (pSmallBit) {
+						// 回绘区域：同样稍微增加 0.5 像素高度以覆盖缝隙
+						D2D1_RECT_F destRect = D2D1::RectF(x, y + curY, x + cx, y + curY + sliceHeight + 0.5f);
+						D2D1_RECT_F smallSrc = D2D1::RectF(0, 0, sw, sh);
+
+						hrt->DrawBitmap(pSmallBit, destRect, 1.0f,
+							D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &smallSrc);
+
+						pSmallBit->Release();
+					}
+				}
+			}
+
+			if (pFullCapture) pFullCapture->Release();
+			if (pMemRT) pMemRT->Release();
+			return hr;
+		}
 		template <class T>
 		void D2DCreateQuickHeavyBlur(T* h, float x, float y, float cx, float cy, float rad)
 		{
@@ -525,6 +605,23 @@ namespace VertexUI
 				if (i > 12) { n = 16; o = 0.8; }
 				if (i > 16) { n = 32; o = 0.8; }
 				if (i < 3) { n = 3; o = 0.5; }
+				if (i < 2) { n = 3; o = 0.3; }
+				D2DRenderCurrentScaledMipmap(h, x, y, cx, cy, n, o);
+			}
+		}
+		template <class T>
+		void D2DCreateQuickHeavyBlur2(T* h, float x, float y, float cx, float cy, float rad)
+		{
+			for (int i = 0; i < rad; i++)
+			{
+				int n = 3;
+				if (gScale < 1.25)n = 2;
+				float o = 0.9f;
+				if (i > 5) { n = 6; o = 0.8; }
+				if (i > 8) { n = 10; o = 0.8; }
+				if (i > 12) { n = 24; o = 0.8; }
+				if (i > 16) { n = 32; o = 0.8; }
+				if (i < 3) { n = 4; o = 0.5; }
 				if (i < 2) { n = 3; o = 0.3; }
 				D2DRenderCurrentScaledMipmap(h, x, y, cx, cy, n, o);
 			}

@@ -1308,6 +1308,9 @@ public:
 		if (from == std::wstring(L"test-comp"))return std::wstring(L"\uf5fd");
 		if (from == std::wstring(L"test-set"))return std::wstring(L"\u2699");
 		if (from == std::wstring(L"test-heart"))return std::wstring(L"\uf004");
+		if (from == std::wstring(L"test-icecream"))return std::wstring(L"\uf810");
+		if (from == std::wstring(L"test-test1"))return std::wstring(L"\u2195");
+		return L" ";
 	}
 	void Set(int x, int y, int cx, const wchar_t* txt2, const wchar_t* txt, int TxtSize = 15, unsigned long TxtColor = VERTEXUICOLOR_WHITE, std::function<void()>events = [] {})
 	{
